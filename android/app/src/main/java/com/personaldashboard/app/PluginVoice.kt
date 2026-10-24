@@ -145,7 +145,7 @@ internal class PluginVoice(private val activity: MainActivity) {
                     p.dialog =
                         AlertDialog.Builder(activity)
                             .setTitle("开启「${bot.getString("name") }」的语音会话？")
-                            .setMessage("允许插件「$id」接收当前 Bot 接下来生成的回复文字。不会读取历史、推理或其他 Bot；离开插件后自动停止。")
+                            .setMessage("允许插件「$id」接收当前 Bot 接下来生成的回复文字。不会读取历史、推理或其他 Bot；离开插件后自动停止。\n\n朗读优先使用系统中文语音，系统语音可能联网；不可用时会使用百度在线语音。使用在线语音时，待朗读文字会发送给对应语音服务。")
                             .setPositiveButton("开启") { _, _ ->
                                 synchronized(lock) {
                                     if (!p.cancelled) p.accepted = true

@@ -11,6 +11,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.widget.Toast
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -157,28 +158,7 @@ class PluginTts(context: Context) {
                         .put("available", false)
                         .put("error", error("system_unavailable", systemMessage(e)))
                 }
-            val systemAvailable = system.optBoolean("available")
-            val provider =
-                if (systemAvailable) PluginTtsPolicy.PROVIDER_SYSTEM
-                else PluginTtsPolicy.PROVIDER_FALLBACK
-            return JSONObject()
-                .put("ok", true)
-                .put("available", true)
-                .put("provider", provider)
-                .put("requiresNetwork", !systemAvailable)
-                .put("networkChecked", false)
-                .put("languages", org.json.JSONArray(listOf("zh-CN")))
-                .put(
-                    "supportedFormats",
-                    org.json.JSONArray(
-                        listOf(
-                            if (systemAvailable) PluginTtsPolicy.SYSTEM_FORMAT
-                            else PluginTtsPolicy.FALLBACK_FORMAT,
-                        ),
-                    ),
-                )
-                .put("maxTextChars", PluginTtsPolicy.MAX_TEXT_CHARS)
-                .put("system", system)
+            return PluginTtsPolicy.status(system)
         }
     }
 
@@ -444,6 +424,15 @@ class PluginTts(context: Context) {
                             listOf(PluginTtsPolicy.SYSTEM_FORMAT),
                         )
                     val temp = tempFile(pluginId, revision, requestId, persistent, cancellation)
+                    val needsNetwork = system.voice?.let {
+                        runCatching { it.isNetworkConnectionRequired }.getOrNull()
+                    }
+                    if (needsNetwork != false) {
+                        showNetworkNotice(
+                            if (needsNetwork == true) "在线语音：朗读文字将发送给系统语音服务。"
+                            else "系统语音可能联网，朗读文字可能发送给语音服务。",
+                        )
+                    }
                     systemSynthesis(system, text, temp, requestId, cancellation)
                     return finishAudio(
                         temp,
@@ -479,6 +468,7 @@ class PluginTts(context: Context) {
                 ?.set(PluginTtsPolicy.PROVIDER_FALLBACK)
             require(pitch == 1f) { "免费回退不支持自定义 pitch" }
             cancellation.check()
+            showNetworkNotice("在线语音：朗读文字将发送给百度语音服务。")
             val body = fallbackDownload(text, cancellation, rate)
             val temp = tempFile(pluginId, revision, requestId, persistent, cancellation)
             temp.writeBytes(body.bytes)
@@ -493,6 +483,14 @@ class PluginTts(context: Context) {
                 requestedFormat,
                 cancellation,
             )
+        }
+    }
+
+    private fun showNetworkNotice(message: String) {
+        main.post {
+            // Shared across requests; streaming replies must not queue a toast for every chunk.
+            if (shownNetworkNotices.add(message))
+                Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -569,7 +567,7 @@ class PluginTts(context: Context) {
                 .put("engine", engine.engine)
                 .put("voice", voice?.name ?: JSONObject.NULL)
                 .put("language", voice?.locale?.toString() ?: "zh-CN")
-                .put("requiresNetwork", networkRequired == true)
+                .put("requiresNetwork", networkRequired != false)
                 .put("offlineConfirmed", networkRequired == false)
         } finally {
             main.post { runCatching { engine.tts.shutdown() } }
@@ -983,6 +981,8 @@ class PluginTts(context: Context) {
         private const val MAX_FILES_PER_REVISION = 16
         private const val MAX_REVISION_BYTES = 16L * 1024 * 1024
         private val operationLock = Any()
+        // Accessed only on the main thread, and reset when the app process restarts.
+        private val shownNetworkNotices = mutableSetOf<String>()
         private val storeLock = Any()
         private val registryLock = Any()
         private val preempted = linkedMapOf<String, Long>()

@@ -83,6 +83,8 @@ await sdk.call('plugin.tts',{op:'speak',text:'你好，鱼缸。',id});
 
 manifest 必须声明 `plugin.tts`。宿主优先使用 Android 系统中文 TextToSpeech；只有系统中文语音不可用时才试用免费 Baidu fanyi gettts 回退，插件不能传入 endpoint、key 或凭据。`status` 只报告线路与格式，不探测网络；`speak` 由宿主请求音频焦点并播放，不依赖页面手势。`firstAudioMs` 从宿主收到请求的单调时钟到媒体播放时钟实际推进的首帧时间（`MediaTimestamp`，不是 `start()` 调用），`firstAudioAt` 与回复事件使用同一 `elapsedRealtimeMs` 时钟，`durationMs` 是媒体文件时长，失败结果不会编造数值。
 
+系统语音也可能使用在线声音。`status.requiresNetwork` 仅在系统声音已确认离线时为 `false`；在线声音、无法确认是否离线及百度回退均为 `true`，不表示当前网络已连通，`networkChecked` 仍为 `false`。页面应按此字段显示“无需联网”或“需要或可能需要联网”，不能仅凭 `provider` 为 `android-system` 判定离线。语音会话提示会说明在线朗读文字的去向；直接 `speak` / `synthesize` 使用在线线路时，宿主也会提示系统语音服务或百度会接收待朗读文字，同一种提示在当前 App 进程内只显示一次，避免分段朗读反复打扰。在线语音与自动回退仍可正常使用。
+
 文本最多600个字符/1800 UTF-8字节。`speak` 是到播放结束才 resolve 的结果Promise；页面助手会把将要使用的UUID挂在 `promise.id`，可在等待期间调用 stop。原生动作需要自行传入 `crypto.randomUUID()`。系统线路输出按文件头识别，通常是 WAV；免费回退输出 MP3。显式请求不支持的格式会返回 `ok:false` 和 `supportedFormats`，不会改标签或写空文件。`synthesize` 会落 `PLUGINS/<id>/media/tts/<revision>/` 私有文件；返回 `file.path`、`file.openPath`、页面可直接作为媒体源的 `file.url`、字节数、真实格式和时长。文件按插件与 revision 隔离，更新、停用或卸载会停止旧音频并清理旧 revision 文件。`stop` 只能停止当前插件当前 revision 对应 id，宿主会释放焦点、播放器和 TTS engine。插件与宿主同 Android UID，这不是操作系统级恶意代码沙箱。
 
 草稿预览可调用模型状态、翻译和对话，按同一插件 ID 计入真实预算，不因临时 revision 获得额外额度；草稿不能修改预算、安排后台计划或发系统通知。断网模拟会在原生层阻止模型请求，返回明确的未发出结果。

@@ -8,6 +8,38 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PluginTtsPolicyTest {
+    @Test
+    fun `available online system voice still reports network required`() {
+        val status = PluginTtsPolicy.status(
+            JSONObject().put("available", true).put("requiresNetwork", true)
+                .put("offlineConfirmed", false),
+        )
+        assertEquals(PluginTtsPolicy.PROVIDER_SYSTEM, status.getString("provider"))
+        assertTrue(status.getBoolean("requiresNetwork"))
+        assertEquals("wav", status.getJSONArray("supportedFormats").getString(0))
+        assertEquals(false, status.getBoolean("networkChecked"))
+    }
+
+    @Test
+    fun `only confirmed offline system voice reports no network needed`() {
+        val status = PluginTtsPolicy.status(
+            JSONObject().put("available", true).put("requiresNetwork", false)
+                .put("offlineConfirmed", true),
+        )
+        assertEquals(false, status.getBoolean("requiresNetwork"))
+        assertTrue(PluginTtsPolicy.status(JSONObject().put("available", true))
+            .getBoolean("requiresNetwork"))
+    }
+
+    @Test
+    fun `unavailable system voice keeps online baidu fallback and mp3`() {
+        val status = PluginTtsPolicy.status(JSONObject().put("available", false))
+        assertTrue(status.getBoolean("available"))
+        assertTrue(status.getBoolean("requiresNetwork"))
+        assertEquals(PluginTtsPolicy.PROVIDER_FALLBACK, status.getString("provider"))
+        assertEquals("mp3", status.getJSONArray("supportedFormats").getString(0))
+    }
+
     @org.junit.Test
     fun nativeActionPlaybackMustLeaveTimeForItsResult() {
         org.junit.Assert.assertFalse(PluginTtsPolicy.fitsActionPlayback(80_000, 72_000))

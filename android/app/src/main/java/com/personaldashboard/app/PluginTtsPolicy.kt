@@ -21,6 +21,25 @@ internal object PluginTtsPolicy {
     const val SYSTEM_FORMAT = "wav"
     val SUPPORTED_FORMATS = setOf(SYSTEM_FORMAT, FALLBACK_FORMAT)
 
+    fun status(system: JSONObject): JSONObject {
+        val systemAvailable = system.optBoolean("available")
+        // An available system voice can still be online. Unknown is not confirmed offline.
+        val requiresNetwork = !systemAvailable || !system.optBoolean("offlineConfirmed")
+        return JSONObject()
+            .put("ok", true)
+            .put("available", true)
+            .put("provider", if (systemAvailable) PROVIDER_SYSTEM else PROVIDER_FALLBACK)
+            .put("requiresNetwork", requiresNetwork)
+            .put("networkChecked", false)
+            .put("languages", org.json.JSONArray(listOf("zh-CN")))
+            .put(
+                "supportedFormats",
+                org.json.JSONArray(listOf(if (systemAvailable) SYSTEM_FORMAT else FALLBACK_FORMAT)),
+            )
+            .put("maxTextChars", MAX_TEXT_CHARS)
+            .put("system", system)
+    }
+
     fun fallbackClient(): okhttp3.OkHttpClient =
         okhttp3.OkHttpClient.Builder()
             .followRedirects(false)
