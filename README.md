@@ -51,6 +51,8 @@ DeepSeek 的形象是一只鲸鱼。主 Bot 是缸里的大鲸鱼，其他 Bot �
 
 ## 安装与开发
 
+- [下载最新版 Android APK](https://github.com/carlos999-hqsama/yugang/releases/latest)，安装后即可使用。
+
 - Android 10+，ARM64。后台运行受手机系统的电池策略影响。
 - 源码构建见 [BUILD.md](BUILD.md)。构建 APK 需要电脑；在手机上使用鱼缸和制作插件不需要连接电脑。
 - [架构说明](ARCHITECTURE.md) · [插件开发接口](android/app/src/main/assets/plugin-developer/host-contract.md) · [参与贡献](CONTRIBUTING.md)

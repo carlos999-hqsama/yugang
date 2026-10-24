@@ -51,6 +51,8 @@ YuGang provides multi-Bot chat, file and web tools, plus networking, models, med
 
 ## Setup and development
 
+- [Download the latest Android APK](https://github.com/carlos999-hqsama/yugang/releases/latest) from GitHub Releases.
+
 - Android 10+, ARM64. Background work is subject to your phone's battery policy.
 - See [BUILD.md](BUILD.md) to build from source. Building the APK requires a computer; using YuGang and creating plugins on your phone does not.
 - [Architecture](ARCHITECTURE.md) · [Plugin API](android/app/src/main/assets/plugin-developer/host-contract.md) · [Contributing](CONTRIBUTING.md)
