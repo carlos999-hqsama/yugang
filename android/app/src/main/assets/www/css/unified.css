@@ -611,5 +611,13 @@ input,textarea,select{accent-color:var(--ui-primary)}
 #scr-harness .chat-image img[hidden]{display:none}
 #scr-harness .chat-image-failure:not([hidden]){display:block;padding:12px;color:#666;font-size:12px}
 
+/* Structured user image blocks stay in the bubble and use the same preview behavior. */
+#scr-harness .ubub .user-images{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+#scr-harness .ubub .user-images:empty{display:none}
+#scr-harness .ubub .user-images .chat-image{width:min(180px,100%);flex:0 0 auto}
+#scr-harness .ubub .user-images .chat-image img{max-height:180px}
+#scr-harness .ubub .chat-image-state{display:flex;align-items:center;gap:8px;padding:18px 20px;color:var(--ui-muted);font-size:12px}
+#sheet .chat-image-view{display:block;flex:1;min-height:0;width:100%;object-fit:contain;background:#111}
+
 /* Keyboard focus uses a neutral fill instead of a rectangular outline. */
 :where(a,button,summary,[role="button"]):focus-visible{background-color:var(--ui-soft,#f0f0f0)}

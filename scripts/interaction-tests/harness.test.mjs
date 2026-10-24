@@ -47,6 +47,7 @@ async function boot({ running = false, storage = {}, registry = {defaultBotId:'d
     presets: { options: [{ value: 'read-only' }] },
   };
   const api = {
+    attachment: async () => { throw Error('测试未提供会话附件'); },
     cancel: async (sid) => { calls.cancel += 1; calls.cancelArgs.push(sid); return { ok: true }; },
     selectModel: async () => ({}),
     setPermission: async () => ({}),
@@ -345,10 +346,11 @@ const twoBots=()=>({defaultBotId:'default',bots:[{id:'default',name:'旧记录',
 const tick=()=>new Promise(r=>setTimeout(r,15));
 test('固定 Bot 的空白会话草稿和附件也彼此隔离',async()=>{
  const app=await boot({registry:twoBots()}),ta=app.root.querySelector('.input textarea');
- ta.value='默认草稿';ta.dispatchEvent('input',{target:ta});app.ns.dev.H.attach=[{name:'default.png'}];
+ ta.value='默认草稿';ta.dispatchEvent('input',{target:ta});app.ns.dev.H.attach=[{name:'default.png',mediaType:'image/png',data:'ZGVmYXVsdA=='}];
  app.ns.dev.selectBot('writer');assert.equal(ta.value,'');assert.equal(app.ns.dev.H.attach.length,0);
  ta.value='写作草稿';ta.dispatchEvent('input',{target:ta});app.ns.dev.selectBot('default');
  assert.equal(ta.value,'默认草稿');assert.equal(app.ns.dev.H.attach[0].name,'default.png');
+ assert.equal(app.root.querySelector('.input .atts img').getAttribute('src'),'data:image/png;base64,ZGVmYXVsdA==');
  app.ns.dev.selectBot('writer');assert.equal(ta.value,'写作草稿');assert.equal(app.calls.api.length,0);
 });
 test('新会话创建在途切换 Bot，绑定和发送仍属于发起机器人',async()=>{
@@ -582,6 +584,99 @@ test('回显早于发送确认且确认失败时保留同一请求重试，不�
  app.api.prompt=async(_s,_c,_m,id)=>{ids.push(id);return {accepted:true}};
  const retry=app.root.querySelector('[data-resend]');retry.dispatchEvent('click',{target:retry});await tick();
  assert.deepEqual(ids,[rpcId,rpcId]);assert.equal(app.root.querySelector('.pending-state'),null);assert.equal(app.ns.dev.H.pending.length,0);
+});
+
+test('用户图片待发送回显重试和历史加载都保留缩略图且不重复',async()=>{
+ const app=await boot({storage:{'pd.h.sel':'"sid-1"'}});app.follows.at(-1).cb({type:'snapshot',header:{},records:[]});
+ const blocks=[
+   {type:'image',mediaType:'image/png',data:'aW1hZ2Ux',name:'first <png>.png'},
+   {type:'image',mediaType:'image/webp',data:'aW1hZ2Uy',name:'second.webp'}
+ ];
+ const prompts=[];let failFirst;app.api.prompt=(_sid,content,_mode,id)=>{prompts.push({content,id});return new Promise((resolve,reject)=>{failFirst=()=>reject(Error('确认连接中断'))});};
+ const ta=app.root.querySelector('.input textarea');ta.value='看这两张图';ta.dispatchEvent('input',{target:ta});
+ app.ns.dev.H.attach=blocks.map(block=>({...block}));sendBtn(app.root).dispatchEvent('click',{target:sendBtn(app.root)});await tick();
+ assert.equal(app.root.querySelectorAll('.ubub.pending .user-images .chat-image').length,2);
+ assert.equal(JSON.stringify(prompts[0].content),JSON.stringify([{type:'text',text:'看这两张图'},...blocks]));
+ const rpcId=app.ns.dev.H.pending[0].rpcId;
+ app.follows.at(-1).cb({type:'event',event:{type:'user/message',seq:1,time:1,data:{source:{kind:'user',rpcId},content:prompts[0].content}}});
+ failFirst();await tick();
+ assert.equal(app.root.querySelectorAll('.ubub .user-images .chat-image').length,2,'回显后不能叠加待发送缩略图');
+ app.api.prompt=async(_sid,content,_mode,id)=>{prompts.push({content,id});return {accepted:true}};
+ app.root.querySelector('[data-resend]').dispatchEvent('click',{target:app.root.querySelector('[data-resend]')});await tick();
+ assert.equal(prompts.length,2);assert.equal(prompts[0].id,prompts[1].id);assert.equal(app.root.querySelectorAll('.ubub .user-images .chat-image').length,2);
+ const inline=app.root.querySelector('.chat-image[data-image]');inline.dispatchEvent('click',{target:inline});await tick();
+ assert.ok(app.doc.getElementById('sheet').classList.contains('on'));
+ assert.equal(app.doc.querySelector('#sheet .chat-image-view').getAttribute('src'),'data:image/png;base64,aW1hZ2Ux');
+ assert.equal(app.ns.dev.H.tabs.length,0);
+});
+
+test('durable历史图片按会话附件异步显示并缓存，恶意文件名只作转义文本',async()=>{
+ const app=await boot({storage:{'pd.h.sel':'"sid-1"'}});const follow=app.follows.at(-1).cb;
+ const ref=(tail,name)=>({attachmentId:'sha256:'+tail.repeat(64),mediaType:'image/png',width:2,height:2,bytes:3,name});
+ const first=ref('a','first.png'),second=ref('b','<img src=x onerror=alert(1)>.png');
+ const calls=[],waiting=[];
+ app.api.attachment=(sid,id)=>{calls.push({sid,id});return new Promise(resolve=>waiting.push(()=>resolve({attachment:{attachmentId:id,mediaType:'image/png'},data:id.startsWith('sha256:b')?'ZGF0YQ==':'YWJj'})));};
+ follow({type:'snapshot',header:{},records:[{type:'event',event:{seq:1,type:'user/message',data:{source:{kind:'user'},content:[
+   {type:'text',text:'看这两张图'},{type:'image',attachment:first},{type:'image',attachment:second},
+   {type:'file',attachment:{name:'<img src=x onerror=alert(1)>.txt'}}
+ ]}}}]});
+ assert.equal(app.root.querySelectorAll('.chat-image[data-status="loading"]').length,2);
+ for(const release of waiting)release();await tick();
+ assert.equal(app.root.querySelectorAll('.chat-image[data-status="loaded"] img').length,2);
+ assert.equal(app.root.querySelectorAll('img').length,2,'恶意文件名不能注入新的 img 节点');
+ follow({type:'snapshot',header:{},records:[{type:'event',event:{seq:2,type:'user/message',data:{source:{kind:'user'},content:[{type:'image',attachment:first}]}}}]});
+ await tick();assert.equal(calls.length,2);assert.equal(app.root.querySelectorAll('.chat-image img').length,1);
+ const image=app.root.querySelector('.chat-image[data-status="loaded"]');image.dispatchEvent('click',{target:image});await tick();
+ assert.ok(app.doc.getElementById('sheet').classList.contains('on'));assert.equal(app.doc.querySelector('#sheet .chat-image-view').getAttribute('src'),'data:image/png;base64,YWJj');
+ const img=image.querySelector('img');img.hidden=false;img.dispatchEvent('error',{target:img});
+ assert.equal(image.dataset.status,'error');assert.equal(img.hidden,true);
+});
+
+test('durable图片读取失败可点击重试且错误消息不注入HTML',async()=>{
+ const app=await boot({storage:{'pd.h.sel':'"sid-1"'}});const attachment={attachmentId:'sha256:'+'c'.repeat(64),mediaType:'image/webp',name:'broken.webp'};
+ let fail=true;const calls=[];
+ app.api.attachment=async()=>{calls.push(1);if(fail)throw Error('<b>附件服务失败</b>');return {attachment:{...attachment},data:'YWJj'};};
+ app.follows.at(-1).cb({type:'snapshot',header:{},records:[{type:'event',event:{seq:1,type:'user/message',data:{source:{kind:'user'},content:[{type:'image',attachment}]}}}]});
+ await tick();
+ let button=app.root.querySelector('.chat-image[data-attachment-id]');
+ assert.equal(button.dataset.status,'error');assert.equal(button.querySelector('img'),null);
+ assert.match(button.innerHTML,/&lt;b&gt;附件服务失败/);assert.doesNotMatch(button.innerHTML,/<b>/);
+ fail=false;button.dispatchEvent('click',{target:button});await tick();
+ assert.equal(calls.length,2);button=app.root.querySelector('.chat-image[data-attachment-id]');
+ assert.equal(button.dataset.status,'loaded');
+ assert.equal(app.root.querySelector('.chat-image img').getAttribute('src'),'data:image/webp;base64,YWJj');
+});
+
+test('切换会话清理附件缓存，旧请求完成不会串到当前会话',async()=>{
+ const registry={defaultBotId:'default',bots:[{id:'default',name:'Bot',pinned:true,sessionIds:['sid-a','sid-b'],selectedSessionId:'sid-a'}]};
+ const app=await boot({storage:{'pd.h.sel':'"sid-a"'},registry});
+ for(const sid of ['sid-a','sid-b'])app.dshState.sessions.set(sid,{sessionId:sid,projections:{values:{title:sid}},updatedAt:1});
+ const id='sha256:'+'d'.repeat(64),waiting=[];
+ app.api.attachment=sid=>new Promise(resolve=>waiting.push({sid,resolve}));
+ app.follows.at(-1).cb({type:'snapshot',header:{},records:[{type:'event',event:{seq:1,type:'user/message',data:{source:{kind:'user'},content:[{type:'image',attachment:{attachmentId:id,mediaType:'image/png'}}]}}}]});
+ assert.equal(app.follows.at(-1).sid,'sid-a');
+ app.ns.dev.select('sid-b');assert.equal(app.follows.at(-1).sid,'sid-b');
+ app.follows.at(-1).cb({type:'snapshot',header:{},records:[{type:'event',event:{seq:1,type:'user/message',data:{source:{kind:'user'},content:[{type:'image',attachment:{attachmentId:id,mediaType:'image/png'}}]}}}]});
+ waiting.find(x=>x.sid==='sid-a').resolve({attachment:{attachmentId:id,mediaType:'image/png'},data:'b2xk'});
+ await tick();assert.equal(app.root.querySelector('.chat-image').dataset.status,'loading','旧会话结果不能绘制到当前会话');
+ waiting.find(x=>x.sid==='sid-b').resolve({attachment:{attachmentId:id,mediaType:'image/png'},data:'bmV3'});
+ await tick();
+ assert.equal(app.root.querySelector('.chat-image img').getAttribute('src'),'data:image/png;base64,bmV3');
+});
+
+test('pending inline图片回显为durable附件后不重复且立即读取',async()=>{
+ const app=await boot({storage:{'pd.h.sel':'"sid-1"'}});app.follows.at(-1).cb({type:'snapshot',header:{},records:[]});
+ let accept;const prompts=[];app.api.prompt=(_sid,content,_mode,id)=>{prompts.push({content,id});return new Promise(resolve=>{accept=()=>resolve({accepted:true})});};
+ const attachmentCalls=[];app.api.attachment=async(_sid,id)=>{attachmentCalls.push(id);return {attachment:{attachmentId:id,mediaType:'image/jpeg'},data:'ZWNobw=='};};
+ const ta=app.root.querySelector('.input textarea');app.ns.dev.H.attach=[{type:'image',mediaType:'image/png',data:'aW1hZ2U=',name:'pending.png'}];
+ sendBtn(app.root).dispatchEvent('click',{target:sendBtn(app.root)});await tick();
+ assert.equal(app.root.querySelectorAll('.ubub.pending .chat-image img').length,1);
+ const rpcId=app.ns.dev.H.pending[0].rpcId,id='sha256:'+'e'.repeat(64);
+ app.follows.at(-1).cb({type:'event',event:{type:'user/message',seq:1,time:1,data:{source:{kind:'user',rpcId},content:[{type:'image',attachment:{attachmentId:id,mediaType:'image/jpeg',name:'echo.jpg'}}]}}});
+ await tick();accept();await tick();
+ assert.equal(app.root.querySelectorAll('.ubub .chat-image').length,1);assert.equal(JSON.stringify(attachmentCalls),JSON.stringify([id]));
+ assert.equal(app.root.querySelector('.chat-image img').getAttribute('src'),'data:image/jpeg;base64,ZWNobw==');
+ assert.equal(app.ns.dev.H.pending.length,0);
 });
 
 test('新会话创建期间切走再切回发起Bot会接回完成的会话',async()=>{

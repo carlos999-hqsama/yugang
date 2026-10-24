@@ -79,9 +79,7 @@ export class Conv {
           if (src.kind !== 'user') break; // 运行时上下文等系统注入的 user 消息不显示
           ended = false;
           const text = visibleUserText(d);
-          const images = (d.content || []).filter((c) => c.type === 'image').length;
-          const files = (d.content || []).filter((c) => c.type === 'file').map((c) => c.name || c.path || '附件');
-          items.push({ k: 'user', text, images, files, id: d.id, rpcId: src.rpcId, seq: e.seq });
+          items.push({ k: 'user', text, content: d.content || [], id: d.id, rpcId: src.rpcId, seq: e.seq });
           break;
         }
         case 'assistant/message': {

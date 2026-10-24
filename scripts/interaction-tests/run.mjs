@@ -17,6 +17,7 @@ if (typeof vm.SourceTextModule !== 'function') {
 }
 
 const FILES = [
+  './attachment-transport.test.mjs',
   './harness.test.mjs',
   './agent-voice.test.mjs',
   './file-links.test.mjs',

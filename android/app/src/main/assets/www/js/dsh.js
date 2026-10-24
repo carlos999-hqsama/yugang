@@ -326,6 +326,7 @@ export function pauseDsh() { stopDsh(); dsh.state = "connecting"; notify("state"
 
 /* ------------------------------------------------------------ 会话操作 */
 export const api = {
+  attachment: (sessionId, attachmentId) => call('session/attachment', { request: { sessionId, attachmentId } }),
   searchSessions: (query) => call('session/search', { request: { query } }),
   createWorkspace: (path = '/BOT/default') => call('workspace/create', { request: { path } }),
   rename: (sessionId, title) => call('session/rename', { request: { sessionId, title } }),

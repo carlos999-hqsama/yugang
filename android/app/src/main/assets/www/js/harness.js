@@ -10,6 +10,7 @@ import { native, on, fileUrl, fileFromUrl } from './native.js';
 import { menu, toast, promptSheet, sheet, closeSheet } from './ui.js';
 import { pair } from './settings.js';
 import { rt, onRt, rtLine, retryRt } from './rt.js';
+import { inlineImageSrc, inlineImageSrcFrom, isInlineImageSrc, userImagesHtml } from './user-images.js';
 
 const LS = (k, d) => { try { const v = localStorage.getItem('pd.h.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } };
 const SV = (k, v) => localStorage.setItem('pd.h.' + k, JSON.stringify(v));
@@ -43,6 +44,46 @@ let el, cover = true, pageVisible = true, chatScroll = null, mountReady = null;
 export const PLUGIN_DEVELOPER_BOT_ID = '00000000-0000-4000-8000-000000000001';
 const PLUGIN_EXAMPLE_REQUEST = '创建一个能联网更新的 AI 新闻插件，并实际预览、测试后安装。';
 
+/* Durable user images are fetched only through the session-authorized API and cached by session. */
+const attachmentSessions = new Map();
+function clearAttachmentSession(sid) {
+  const session = attachmentSessions.get(sid);
+  if (!session) return;
+  session.cancelled = true;
+  session.items.clear();
+  attachmentSessions.delete(sid);
+}
+function readDurableAttachment(sid, image, force = false) {
+  if (!sid) return { status: 'loading' };
+  let session = attachmentSessions.get(sid);
+  if (!session) {
+    session = { cancelled: false, items: new Map() };
+    attachmentSessions.set(sid, session);
+  }
+  let entry = session.items.get(image.attachmentId);
+  if (entry?.status === 'loading') return entry;
+  if (entry && !force) return entry;
+  entry = { status: 'loading', error: '', src: '' };
+  session.items.set(image.attachmentId, entry);
+  (async () => {
+    const result = await api.attachment(sid, image.attachmentId);
+    const attachment = result?.attachment || {};
+    if (attachment.attachmentId !== image.attachmentId) throw Error('附件返回身份不匹配');
+    const src = inlineImageSrcFrom(attachment.mediaType, result?.data);
+    if (!src) throw Error('附件返回的图片数据无效');
+    return src;
+  })().then(src => {
+    if (session.cancelled) return;
+    entry.status = 'loaded'; entry.src = src; entry.error = '';
+    if (H.sel === sid) renderMsgsSoon();
+  }, error => {
+    if (session.cancelled) return;
+    entry.status = 'error'; entry.error = String(error?.message || error || '请重试').slice(0, 200);
+    if (H.sel === sid) renderMsgsSoon();
+  });
+  return entry;
+}
+
 /* ============================================================ 骨架 */
 export async function mount(root) {
   el = root;
@@ -52,8 +93,10 @@ export async function mount(root) {
   root.addEventListener('click', onClick);
   root.addEventListener('error', event => {
     const image = event.target;
-    if (image?.tagName !== 'IMG' || !image.closest('.chat-image')) return;
-    image.hidden = true;const label=image.parentElement.querySelector('.chat-image-failure');if(label)label.hidden=false;
+    if (String(image?.tagName || '').toUpperCase() !== 'IMG' || !image.closest('.chat-image')) return;
+    const holder = image.closest('.chat-image');
+    if (holder?.dataset?.attachmentId) holder.dataset.status = 'error';
+    image.hidden = true;const parent=image.parentElement || image.parentNode;const label=parent?.querySelector('.chat-image-failure');if(label)label.hidden=false;
   }, true);
   root.addEventListener('input', onInput);
   root.addEventListener('keydown', onKey);
@@ -308,6 +351,7 @@ function renderSide(){
 
 /* ============================================================ 选择 / 关注会话 */
 function select(sid, { keep = false, botId = null } = {}) {
+  if (H.sel && H.sel !== sid) clearAttachmentSession(H.sel);
   if (!keep) { H.mobileChat = true; el.classList.toggle('mobile-chat', true); }
   if (!keep && (!botId||botId===H.botId) && sid === H.sel && H.fh) { chatScroll?.refresh(); return; }
   if(H.sel&&H.sel!==sid){chatScroll?.remember();H.readings.set(H.sel,{...chatScroll.state});}
@@ -490,7 +534,7 @@ function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true }
         const activeLabel = latest && !latest.result ? (latest.approval?.state === 'asked' ? '等待授权' : String(latest.args?.description || ({read:'正在读取文件',bash:'正在执行命令',search:'正在搜索',edit:'正在编辑文件',agent:'子任务执行中'}[category(latest)] || '正在调用工具')).slice(0, 80)) : '';
         return `<details class="process-fold" data-disclosure="${esc(disclosureKey)}" data-scroll-key="${esc(key)}"${expanded ? ' open' : ''}><summary>${it.running ? '<span class="spin" style="width:12px;height:12px"></span>' : ''}<span>${esc(activeLabel || it.label)}</span><small>执行过程</small></summary><div class="process-content">${it.items.map((child, i) => renderItem(child, i)).join('')}</div></details>`;
       }
-      if (it.k === 'user') html += `<div class="ubub" data-scroll-key="${esc(key)}">${esc(it.text)}${it.images ? `${it.text ? '\n' : ''}[图片 ×${it.images}]` : ''}${it.files.length ? `\n[附件 ${esc(it.files.join('、'))}]` : ''}</div>`;
+      if (it.k === 'user') html += `<div class="ubub" data-scroll-key="${esc(key)}">${esc(it.text)}${userImagesHtml(it.content, { attachment: image => readDurableAttachment(H.sel, image) })}</div>`;
       else if (it.k === 'text') html += `<div class="mdw${it.live ? ' live' : ''}" data-scroll-key="${esc(key)}">${md(it.text)}</div>`;
       else if (it.k === 'think') html += `<details class="reasoning-fold" data-disclosure="${esc(H.sel + ':' + it.key)}" data-scroll-key="${esc(key)}"${H.disclosures.get(H.sel + ':' + it.key) ? ' open' : ''}><summary>${it.live ? '正在思考…' : '思考过程'}</summary><div class="think">${esc(it.text)}</div></details>`;
       else if (it.k === 'tools') html += lineFor(it);
@@ -506,7 +550,7 @@ function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true }
   }
   for (const p of H.pending.filter(x => x.sid === H.sel)) {
     const failure = p.error ? `<small class="pending-state">${p.echoed ? '发送确认失败' : '发送失败'}：${esc(p.error)} <button type="button" class="btn" data-resend="${esc(p.rpcId)}">重试</button></small>` : '';
-    if (!p.echoed) html += `<div class="ubub pending" data-scroll-key="${esc('pending:' + p.rpcId)}">${esc(p.text)}${failure}</div>`;
+    if (!p.echoed) html += `<div class="ubub pending" data-scroll-key="${esc('pending:' + p.rpcId)}">${esc(p.text)}${userImagesHtml(p.content)}${failure}</div>`;
     else if (failure) html += `<div class="sysnote" data-scroll-key="${esc('pending-error:' + p.rpcId)}">${failure}</div>`;
   }
   const pending = H.pending.findLast(p => p.sid === H.sel && !p.error);
@@ -578,7 +622,8 @@ function updateInputRow() {
 <button type="button" class="chip mdl" data-act="model" aria-label="切换模型"><span class="full">${esc(modelLabel(m, false))}</span><span class="short">${esc(modelLabel(m, true))}</span> ${S.chev}</button>
 <div style="flex:1"></div>${showStop ? `<button type="button" class="send stop" aria-label="停止回复" data-act="stop"${dsh.state !== 'online' || stopping ? ' disabled' : ''}>${S.stop}</button>` : ''}${showSend ? `<button type="button" class="send${disabled ? ' off' : ''}" aria-label="发送消息" data-act="send"${disabled ? ' disabled' : ''}>${S.up}</button>` : ''}`;
   const at = el.querySelector('.input .atts');
-  at.innerHTML = H.attach.length ? `<div class="thumbs" style="margin:0 0 8px">${H.attach.map((a, i) => `<img src="data:${a.mediaType};base64,${a.data}" data-rm="${i}" title="点击移除">`).join('')}</div>` : '';
+  const thumbs = H.attach.map((a, i) => ({ src: inlineImageSrc(a), i })).filter(a => a.src);
+  at.innerHTML = thumbs.length ? `<div class="thumbs" style="margin:0 0 8px">${thumbs.map(({ src, i }) => `<img src="${esc(src)}" data-rm="${i}" title="点击移除" alt="">`).join('')}</div>` : '';
 }
 /** 停止运行：单飞锁保证一次只发一个取消请求；重复点击不再重复取消，也不重发写操作。 */
 async function stopRun(sid) {
@@ -641,8 +686,7 @@ async function send() {
         H.drafts[origin] = ''; H.attachmentDrafts.delete(origin);
       }
     }
-    const p = { sid, rpcId: uuid(), content, mode: dsh.running.has(sid) ? 'steer' : 'queue',
-      text: text + (attach.length ? `${text ? '\n' : ''}[图片 ×${attach.length}]` : ''), t: Date.now() };
+    const p = { sid, rpcId: uuid(), content, mode: dsh.running.has(sid) ? 'steer' : 'queue', text, t: Date.now() };
     H.pending.push(p);
     if (H.sel === sid) renderMsgs(true);
     await deliverPending(p);
@@ -824,6 +868,23 @@ async function onClick(e) {
     const code = copyCode.closest('.code-block')?.querySelector('pre code');
     native.copy(code?.textContent || '').then(() => toast('已复制'), (x) => toast(x.message || '复制失败')); return;
   }
+  const durableImage = t.closest('.chat-image[data-attachment-id]');
+  if (durableImage) {
+    if (durableImage.dataset.status === 'error') {
+      readDurableAttachment(H.sel, { attachmentId: durableImage.dataset.attachmentId }, true);
+      renderMsgs();
+    } else if (durableImage.dataset.status === 'loaded') {
+      const src = durableImage.querySelector('img')?.getAttribute('src') || '';
+      if (isInlineImageSrc(src)) showImageSheet(src, durableImage.dataset.imageTitle || '图片');
+    }
+    return;
+  }
+  const inlineImage = t.closest('.chat-image[data-image]');
+  if (inlineImage) {
+    const src = inlineImage.querySelector('img')?.getAttribute('src') || '';
+    if (isInlineImageSrc(src)) showImageSheet(src, inlineImage.dataset.imageTitle || '图片');
+    return;
+  }
   const art = t.closest('[data-art]'); if (art) { if(H.inspector){H.inspector=false;SV('inspector',false);el.classList.remove('bot-detail-open');} openArtifact(art.dataset.art); return; }
   const fl = t.closest('code.fl'); if (fl) { openArtifact(expandHome(fl.dataset.file)); return; }
   const a = t.closest('a[data-href]'); if (a) { const u = a.dataset.href; if (/^https?:/.test(u)) openUrl(u); else openArtifact(expandHome(resolvePath(u, H.conv?.header?.cwd))); return; }
@@ -869,6 +930,11 @@ async function onClick(e) {
     case 'extopen': { const tb = H.tabs.find((x) => x.id === H.active); if (tb && /^https?:/.test(tb.url) && !fileFromUrl(tb.url)) native.openExternal(tb.url); break; }
     default: break;
   }
+}
+
+function showImageSheet(src, title = '图片') {
+  if (!isInlineImageSrc(src)) return;
+  sheet({ title, full: true, body: `<img class="chat-image-view" src="${esc(src)}" alt="${esc(title)}">` });
 }
 
 /* ============================================================ 内置浏览器 */
