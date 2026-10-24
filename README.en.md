@@ -35,7 +35,11 @@ Bring your own DeepSeek API key. Tasks run on your phone; model inference uses a
 
 ![YuGang plugin guide](site/images/plugin-guide.png)
 
-These are screenshots from the Android app. The header image is a concept illustration.
+**AI news plugin example (installed separately)**
+
+![YuGang AI news plugin in a tablet layout](site/images/ai-news-plugin.jpg)
+
+Screenshots captured on a Xiaomi 18 Fold. Tablet layouts are supported.
 
 ## Fish and plugins
 

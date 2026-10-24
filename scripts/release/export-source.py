@@ -49,6 +49,7 @@ EXTRA_SOURCE_FILES = (
     "site/images/yugang-concept.png",
     "site/images/chat.png",
     "site/images/plugin-guide.png",
+    "site/images/ai-news-plugin.jpg",
 )
 
 # Business plugins and private companion services can never re-enter a core export.
@@ -139,6 +140,7 @@ ADMITTED_BINARIES = {
     Path("site/images/yugang-concept.png"),
     Path("site/images/chat.png"),
     Path("site/images/plugin-guide.png"),
+    Path("site/images/ai-news-plugin.jpg"),
     Path("android/gradle/wrapper/gradle-wrapper.jar"),
     Path("android/app/src/main/assets/www/img/fish-atlas.png"),
     Path("android/app/src/main/res/drawable-nodpi/launcher_whale.png"),

@@ -35,7 +35,11 @@ flowchart LR
 
 ![鱼缸插件引导界面](site/images/plugin-guide.png)
 
-上方是手机实机截图；页首是概念插画。
+**AI 新闻插件示例（独立安装）**
+
+![鱼缸 AI 新闻插件的平板布局](site/images/ai-news-plugin.jpg)
+
+截图来自小米 18 Fold，已适配平板布局。
 
 ## 鱼和插件
 
