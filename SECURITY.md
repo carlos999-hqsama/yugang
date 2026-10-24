@@ -27,7 +27,7 @@ npm11.21.1 上游发布包仍带 ip-address10.7.2，匹配 [GHSA-rxp7-6hxx-x8q5]
 公开源码按固定模板、源码根与文本后缀规则导出，二进制逐项准入，APK 包含核心、公共框架、通用默认人格与公开运行时，不包含设备安装后的 Bot 工作区、聊天/附件、用户修改的人格、模型凭据、个人插件与注册表。源代码目录和设备运行目录不同，设备内没有 Git 历史或仓库 README 是正常情况。公开源码提供 GPL 许可证、构建说明和第三方声明；运行时依赖由锁定的公开来源构建。`PD_APP_SOCKET` 和 `PD_HOST_RUNTIME_SOCKET` 是同 UID 的本地桥接入口，不是个人远端地址；外部模型或通知地址与凭据由用户配置。固定 `/opt/pd`、`/BOT` 等是 Android 内置运行时的目录契约，不应为“去个人化”而禁用必需能力。
 
 
-完整的同日扫描记录与最终清单对照保存在 [DEPENDENCY_REVIEW.json](DEPENDENCY_REVIEW.json)，最终组件清单为 [DEPENDENCIES.cdx.json](DEPENDENCIES.cdx.json)。这两份记录不覆盖未来依赖变更；不能只复制旧扫描日期或复用旧依赖结果。代码规范提示见 [QUALITY.md](QUALITY.md)。
+完整的同日扫描记录与最终清单对照保存在 [DEPENDENCY_REVIEW.json](DEPENDENCY_REVIEW.json)，最终组件清单为 [DEPENDENCIES.cdx.json](DEPENDENCIES.cdx.json)。这两份记录不覆盖未来依赖变更；不能只复制旧扫描日期或复用旧依赖结果。
 
 ## 发布前隐私核对
 

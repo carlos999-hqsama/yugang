@@ -97,10 +97,6 @@ Bot 目录是组织边界。PRoot、WebView 和能力声明不是抵御恶意插
 
 宿主源码使用 GPL-3.0-only；第三方声明、对应源码和 SBOM 按实际构建的版本匹配。构建入口和固定运行时见 [BUILD.md](BUILD.md)，完整剥离记录见 [CORE_SPLIT.md](CORE_SPLIT.md)。通过构建不表示全部依赖没有已知风险，保留公告与限制见 SECURITY.md。
 
-截至 2026-10-24：当前 Core 原生检查 167 项、交互检查 85 项、发布工具检查 25 项已在主控环境通过。Linux 使用最终公开源码和该环境下载的依赖清空编译输出后重建，具体结果与签名、产物摘要由同次发布记录给出，不把源码内历史基线计数当作最终二进制验收。当前代码规范扫描还保留 749 条提示；分类、完整逐项记录与复扫方式见 [QUALITY.md](QUALITY.md)。固定依赖的已知公告和覆盖缺口见 [SECURITY.md](SECURITY.md)。
-
-早期候选曾在 ARM64 Android 17 完成独立空白首启、运行时初始化与重启；该证据仅适用于当时包，不能证明当前最终包全部交互通过。有效账号模型发现按用户要求跳过，首次插件引导与最新公开 Core 的完整真机复测仍未完成。现用私人完整版的启动问题已修复并由用户确认，不能替代公开 Core 验收。
-
 ## English overview
 
 YuGang Core separates the Android host, local DeepSeek Agent Harness, per-Bot workspaces and independently installed plugins. Shared persona, Bot role, local memory and tool settings are assembled from current host configuration; skill instructions are disclosed on demand and tool switches are checked again before execution. Plugins reuse a versioned framework and real host network, model, media, TTS, preview, background and notification implementations. They share the application UID and are trusted code, not sandboxed hostile extensions.

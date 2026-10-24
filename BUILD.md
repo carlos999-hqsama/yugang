@@ -29,8 +29,6 @@ python3 scripts/check-app-distribution.py android/app/build/outputs/apk/release/
 
 Gradle 使用 `android/gradle/verification-metadata.xml` 校验构建插件与依赖制品。升级依赖须审查来源、更新校验文件和许可清单，不能为绕过失败关闭校验。
 
-在 ARM 宿主上通过 QEMU 运行 x86_64 Linux 时，本轮发现 OpenJDK 17 的 C2 即时编译代码在 R8 阶段触发 `SIGILL`，不属于 Android 源码编译错误。该环境可在构建进程中使用 `JAVA_TOOL_OPTIONS='-XX:+TieredCompilation -XX:TieredStopAtLevel=1 -XX:UseAVX=0'`，限制为 C1 编译后重新运行原命令；不关闭 R8、lint、依赖校验或 APK 优化，也不把这些主机选项写入 App。原生 Linux 构建不默认需要这些选项。 本轮另观察到该 QEMU 环境在整组 C1 检查中长时间未见进展。保留已经完成的 R8 输出（实际确认 `minifyReleaseWithR8 UP-TO-DATE`）后，改用 `JAVA_TOOL_OPTIONS='-XX:UseAVX=0'` 和 `--max-workers=1` 重跑原完整检查与出包已通过；没有跳过检查。原因尚未最终定位，这只是本轮分阶段恢复记录，不是对原生 Linux 的默认要求。
-
 
 构建消费运行时的方式：`pack.py` 的临时归档与进程锁位于 `android/build/runtime-pack`，不进入资产根。完整归档与 manifest 成对发布；Gradle 的 `prepareRuntimeAssets` 从已打开文件复制并核对独立副本，只把 `runtime.json` 和 `runtime.tar.xz` 放入 `app/build/generated/runtime-assets/runtime`。资产合并消费这个稳定快照，源文件被并发替换时不会重读另一份归档；捕获到混合版本则明确失败，保留上一份有效快照。Debug 与 Release 均依赖此任务；源输入变化仍必须重打包。源输入、许可和依赖守卫分别挂在无输出的 `preDebugBuild` / `preReleaseBuild`，不依赖增量资产合并是否执行；即使合并输出未变，修改 producer 或 overlay 后不重打包也会明确失败。
 
@@ -77,7 +75,7 @@ adb -s <emulator> shell am instrument -w -e scenario previewLifecycle com.person
 - 使用 `python3 scripts/release/export-source.py <新目录>` 生成可重复 core-only 源码树；目标目录必须不存在，防止覆盖旧发布。
 - 使用 `scripts/release/generate-sbom.py` 基于实际许可证目录与 Debian 对应源码生成 SBOM。
 - 使用 `scripts/release/render-notices.py` 与 `complete-license-metadata.py` 处理实际 runtime/Android 依赖声明。
-- 发布 APK 必须与公开源码、固定 runtime 输入和第三方源码/许可材料一一对应；不能用私人全量 APK 冒充本仓库构建。
+- 发布 APK 必须与公开源码、固定 runtime 输入和第三方源码/许可材料一一对应。
 - 第三方对应源码归档生成后，执行 `python3 scripts/release/normalize-source-archive.py <原始.tar.gz> <新的公开.tar.gz>`。发布规范化后的文件，逐项复核 `SOURCE_INDEX.json` 中的内容摘要；不要直接分发本机 `tar.add` 生成、带用户名或 PAX 私人路径的归档。规范化只清理外层归档元数据，保留上游源码与许可证原文。
 
 本项目固定运行时输入版本和下载摘要，不承诺两次构建产生字节完全相同的 APK/runtime；发布记录保存实际产物摘要。
@@ -99,4 +97,4 @@ apksigner verify --verbose --print-certs yugang-core-release.apk
 
 保存签名 APK、源码归档、runtime、许可材料与 SBOM 的摘要及公开证书指纹。比较签名前后 ZIP 的原成员内容；只允许增加签名元数据，不更换代码或资源。设备安装后再次核对 APK 摘要、包名、版本和非 Debuggable 状态。
 
-公开 Core 包名独立于私人完整版。首次安装前确认目标包不存在，验收冷启动、运行时初始化、空白配置、默认 Bot、无业务插件和强停重启；不能用既有完整版覆盖安装代替。临时空白验收包清理时仅卸载本轮创建的 Core，不能卸载或清空原 App。回退代码只恢复本次修改文件并重建；原有安装通过同包同证书保留数据覆盖，必要时使用更高版本码，不能用清数据绕过兼容问题。
+首次安装测试使用独立测试环境，检查冷启动、运行时初始化、空白配置、默认 Bot、插件引导和重启。更新安装须使用相同包名和签名，保留已有数据；回退时使用兼容的版本码，不通过清除用户数据绕过兼容问题。

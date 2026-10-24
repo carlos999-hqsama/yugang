@@ -21,7 +21,6 @@ PUBLIC_TEMPLATES = (
     "BUILD.md",
     "ARCHITECTURE.md",
     "SECURITY.md",
-    "QUALITY.md",
     "DEPENDENCY_REVIEW.json",
     "DEPENDENCIES.cdx.json",
     "CONTRIBUTING.md",
@@ -47,6 +46,9 @@ EXTRA_SOURCE_FILES = (
     "android/settings.gradle.kts",
     "android/app/build.gradle.kts",
     "android/app/proguard-rules.pro",
+    "site/images/yugang-concept.png",
+    "site/images/chat.png",
+    "site/images/plugin-guide.png",
 )
 
 # Business plugins and private companion services can never re-enter a core export.
@@ -125,12 +127,18 @@ TEXT_FILE_NAMES = {
     ".dockerignore",
 }
 
-EXCLUDED_SOURCE_FILES = set()
+EXCLUDED_SOURCE_FILES = {
+    "scripts/quality/detekt-findings.xml",
+    "scripts/quality/lint-findings.xml",
+}
 
 # Binary formats are not admitted by extension. Each redistributed binary has
 # to be named here so a newly dropped image, archive, key, or database cannot
 # silently become public.
 ADMITTED_BINARIES = {
+    Path("site/images/yugang-concept.png"),
+    Path("site/images/chat.png"),
+    Path("site/images/plugin-guide.png"),
     Path("android/gradle/wrapper/gradle-wrapper.jar"),
     Path("android/app/src/main/assets/www/img/fish-atlas.png"),
     Path("android/app/src/main/res/drawable-nodpi/launcher_whale.png"),

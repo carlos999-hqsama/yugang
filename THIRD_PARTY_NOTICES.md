@@ -1,6 +1,6 @@
 # 第三方组件与分发责任
 
-宿主源码为 GPL-3.0-only；下列组件保留自己的许可证、商标和版权声明。源码树内明确附带的 Termux 原始二进制包，同时附有完整对应源码及 Termux 构建配方；其它第三方二进制不随源码树提供。发布 APK、runtime 归档、Docker 镜像或其它二进制功能时，必须为该次实际构建提供组件清单、许可正文，以及 GPL/LGPL 等许可证要求的对应源码和构建脚本。
+宿主源码为 GPL-3.0-only；下列组件保留自己的许可证、商标和版权声明。源码树内明确附带的 Termux 原始二进制包，同时附有完整对应源码及 Termux 构建配方；源码树另附 Apache-2.0 许可的 Gradle Wrapper bootstrap JAR；其它第三方运行时二进制在构建时获取。发布 APK、runtime 归档、Docker 镜像或其它二进制功能时，必须为该次实际构建提供组件清单、许可正文，以及 GPL/LGPL 等许可证要求的对应源码和构建脚本。
 
 | 组件 | 固定版本 / 依据 | 许可与处理 |
 | --- | --- | --- |
@@ -15,7 +15,7 @@
 | LibreOffice Kit JS wrapper | 0.1.3 | MPL-2.0；大型可选 wasm 运行时未打包 |
 | AndroidX、Kotlin、OkHttp 等 | Gradle 实际 releaseRuntimeClasspath | 各 Maven POM、source JAR 与发行包中的声明 |
 | XZ for Java | 1.10 | 0BSD 等，以该版本源码声明为准 |
-| Gradle Wrapper | 9.3.1 | Apache-2.0；Gradle 下载分发包由官方摘要校验 |
+| Gradle Wrapper / Gradle distribution | bootstrap JAR 8.12.1 / distribution 9.3.1 | Apache-2.0；Wrapper JAR 对照 [Gradle 官方校验清单](https://gradle.org/release-checksums/)；Gradle 下载分发包由 `distributionSha256Sum` 校验 |
 
 原生库取自官方 Termux 包，不从其它 App 的 APK 或未注明版本的仓库复制。为适应 Android nativeLibraryDir，打包脚本将 talloc 的 SONAME/NEEDED 文件名改成 `.so`，不修改库代码；转换脚本随源代码提供。PRoot 使用环境变量指定 loader 路径。
 
