@@ -46,8 +46,8 @@ android {
         applicationId = "com.personaldashboard.core"
         minSdk = 29
         targetSdk = 35
-        versionCode = 20001
-        versionName = "2.0.0-core.1"
+        versionCode = 20002
+        versionName = "2.0.0-core.2"
         testInstrumentationRunner = "com.personaldashboard.app.PluginDeviceTest"
         // 内置运行时（PRoot + Debian arm64 + Node + dsh）只支持 arm64
         ndk { abiFilters += listOf("arm64-v8a") }
