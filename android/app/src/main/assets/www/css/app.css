@@ -1,0 +1,437 @@
+/* 个人仪表盘 — 应用样式。design.css 为设计稿 common.css 原样拷贝；
+   本文件逐屏收录设计稿 *.src.html 内联样式（按屏幕 id 与 inner/cover 作用域隔离），
+   另补充交互态（弹层、菜单、设置页等设计稿未覆盖部分，沿用同一视觉语言）。 */
+:root{--sat:0px;--sab:0px;--sal:0px;--sar:0px}
+body{background:#f6f6f7;padding:var(--sat) var(--sar) var(--sab) var(--sal);user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+.sel-text,.msgs,.evt,input,textarea{user-select:text;-webkit-user-select:text}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.dev-frame{display:none}
+body.frame .dev-frame{display:flex}
+body.frame .gnav.dev-frame{display:flex;background:#fafafa}
+.main{flex:1;display:flex;min-height:0;position:relative}
+.scr{display:none;flex:1;min-width:0;min-height:0}
+.scr.on{display:flex}
+.rail{display:flex}
+/* 短屏（横屏/折叠）时导航要能滚到底部，设置入口不能被裁掉。 */
+@media (max-height:560px){
+  body.cover .rail{gap:3px;padding:4px 2px}
+  body.cover .rail .ri{min-height:40px;padding:4px 0 3px}
+  body.cover .rail .logo{margin-bottom:4px}
+}
+.tbar2{display:none}
+.rail .nav-short{display:none}
+body.cover .rail{width:52px;padding:6px 2px;gap:6px}
+body.cover .rail .ri{width:44px;min-height:48px;justify-content:center}
+body.cover .rail .logo{margin-bottom:8px}
+body.cover .rail .logo span,body.cover .rail .av,body.cover .rail .nav-full{display:none}
+body.cover .rail .nav-short{display:block;font-size:10px}
+.rail .ri,.tbar2 .ri{cursor:pointer}
+.rail .av{cursor:pointer}
+.ico.sm{width:14px;height:14px}
+.clickable{cursor:pointer}
+.hide{display:none!important}
+.muted{color:#8a8a90}
+.mono{font-family:ui-monospace,'JetBrains Mono',monospace}
+
+/* ===================== Harness（inner.src.html） ===================== */
+#scr-harness{background:#f6f6f7}
+body.inner #scr-harness .side{width:20%;min-width:170px;padding:4px 8px 0}
+#scr-harness .side .list{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+#scr-harness .side .list::-webkit-scrollbar{display:none}
+#scr-harness .dv{width:9px;flex:none;position:relative;background:#fff;border-left:1px solid #e6e6e9;touch-action:none;cursor:col-resize}
+#scr-harness .dv:after{content:"";position:absolute;left:3px;top:50%;width:3px;height:28px;margin-top:-14px;border-radius:2px;background:#d3d3d8}
+#scr-harness .dv.b{border-left:0;border-right:1px solid #e6e6e9}
+#scr-harness .chat{background:#fff;display:flex;flex-direction:column;min-width:0;flex:1}
+body.inner #scr-harness .chat{width:41%;flex:none}
+body.inner #scr-harness.nobrowser .chat{flex:1;width:auto}
+body.inner #scr-harness.nobrowser .dv.b,body.inner #scr-harness.nobrowser .br{display:none}
+body.inner #scr-harness .chead{height:40px;display:flex;align-items:center;gap:8px;padding:0 14px;font-size:13.5px;font-weight:600;border-bottom:1px solid #f0f0f2;flex:none}
+body.inner #scr-harness .chead .t{display:flex;align-items:baseline;gap:8px;min-width:0;flex:1;white-space:nowrap;overflow:hidden}
+body.inner #scr-harness .chead .t>div{overflow:hidden;text-overflow:ellipsis}
+body.inner #scr-harness .chead small{font-weight:400;color:#9a9aa0;font-size:11.5px}
+body.inner #scr-harness .chead .st{display:none}
+#scr-harness .msgs{flex:1;overflow-y:auto;overflow-x:hidden;padding:14px 18px 0;display:flex;flex-direction:column;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 48px);scrollbar-width:none}
+#scr-harness .msgs::-webkit-scrollbar{display:none}
+#scr-harness .msgs .spacer{flex:1 0 0}
+body.inner #scr-harness .msgs p,body.inner #scr-harness .msgs ul,body.inner #scr-harness .msgs ol,body.inner #scr-harness .ubub{font-size:12.5px}
+body.inner #scr-harness .chat .input{margin:8px 12px 6px}
+#scr-harness .br{flex:1;background:#fff;display:flex;flex-direction:column;min-width:0}
+#scr-harness .tabs{height:34px;display:flex;align-items:flex-end;gap:2px;padding:0 8px;background:#f3f3f5;border-bottom:1px solid #e6e6e9;flex:none;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+#scr-harness .tabs::-webkit-scrollbar{display:none}
+#scr-harness .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;font-size:11.5px;color:#666;border-radius:8px 8px 0 0;width:150px;max-width:150px;white-space:nowrap;cursor:pointer;flex:0 0 auto;min-width:0}
+#scr-harness .tab>span:not(.x){overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+#scr-harness .tab.on{background:#fff;color:#111;border:1px solid #e6e6e9;border-bottom:0;margin-bottom:-1px;height:29px}
+#scr-harness .tab .x{display:flex;align-items:center;justify-content:center;opacity:.8;flex:0 0 24px;width:24px;height:26px;padding:0;border:0;background:none;color:inherit;cursor:pointer}
+#scr-harness .fav{background:var(--ui-muted)!important;width:12px;height:12px;border-radius:3px;flex:none}
+#scr-harness .bbar{height:38px;display:flex;align-items:center;gap:4px;padding:0 8px;color:#555;border-bottom:1px solid #eee;flex:none}
+#scr-harness .bbar .nb{display:flex;padding:3px;border-radius:6px}
+#scr-harness .bbar .nb.dis{color:#bbb}
+#scr-harness .addr{flex:1;height:26px;border-radius:13px;background:#f3f3f5;display:flex;align-items:center;padding:0 10px;font-size:11.5px;color:#444;gap:6px;white-space:nowrap;overflow:hidden;min-width:0}
+#scr-harness .addr input{flex:1;min-width:0;border:0;background:none;font:inherit;color:inherit;outline:none}
+#scr-harness .bview{flex:1;position:relative;background:#fff;min-height:0}
+#scr-harness .bview iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+#scr-harness .bview .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#9a9aa0;font-size:12px;text-align:center;padding:20px}
+#scr-harness .bprog{height:2px;background:var(--ui-primary);width:0;transition:width .2s;position:absolute;top:0;left:0;z-index:2}
+body.inner #scr-harness .chat .chip{padding:4px 7px;font-size:11.5px}
+body.inner #scr-harness .chat .input .row{gap:5px}
+#scr-harness .sidehead{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 6px;color:#555}
+#scr-harness .sidehead b{font-size:13.5px;color:#111;white-space:nowrap}
+#scr-harness .sidehead span{display:flex;gap:8px}
+#scr-harness .sidehead .clickable{display:flex}
+#scr-harness .nitem{cursor:pointer}
+#scr-harness .sess,#scr-harness .folder{cursor:pointer}
+#scr-harness .sess .spin{flex:none}
+#scr-harness .sess svg{flex:none}
+#scr-harness .sec .clickable{display:flex}
+#scr-harness .sfilter{margin:2px 4px 6px;height:28px;border-radius:8px;background:#ececef;border:0;padding:0 10px;font:inherit;font-size:12.5px;outline:none;width:calc(100% - 8px)}
+#scr-harness.noside .side,#scr-harness.noside .dv.a{display:none}
+#scr-harness .reopen{display:none}
+#scr-harness.noside .reopen{display:flex}
+body.inner #scr-harness.expand .side,body.inner #scr-harness.expand .chat,body.inner #scr-harness.expand .dv{display:none}
+
+/* ===================== Harness（cover-chat-sidebar.src.html） ===================== */
+body.cover #scr-harness{background:#fff}
+body.cover #scr-harness .side{width:158px;flex:none;border-right:1px solid #e6e6e9;padding:2px 5px 0}
+body.cover #scr-harness .side .sess{padding:6px 6px 6px 22px;font-size:12px;gap:5px}
+body.cover #scr-harness .side .sess.flat{padding-left:6px}
+body.cover #scr-harness .side .sess em{display:none}
+body.cover #scr-harness .side .sec{padding:10px 6px 3px;font-size:11px}
+body.cover #scr-harness .side .folder{padding:6px 4px;font-size:12px;gap:5px}
+body.cover #scr-harness .sidehead{padding:4px}
+body.cover #scr-harness .sidehead b{font-size:12.5px}
+body.cover #scr-harness .sidehead span{gap:6px}
+body.cover #scr-harness .side .nitem{padding:6px;font-size:12.5px}
+body.cover #scr-harness .dv,body.cover #scr-harness .br{display:none}
+body.cover #scr-harness .chead{height:44px;display:flex;align-items:center;gap:4px;padding:0 6px 0 10px;border-bottom:1px solid #f0f0f2;flex:none}
+body.cover #scr-harness .chead .t{flex:1;min-width:0}
+body.cover #scr-harness .chead .t div{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.cover #scr-harness .chead .t small{font-size:10.5px;color:#9a9aa0;display:flex;align-items:center;gap:4px}
+body.cover #scr-harness .msgs{padding:10px 12px 0}
+body.cover #scr-harness .msgs p,body.cover #scr-harness .msgs ul,body.cover #scr-harness .msgs ol,body.cover #scr-harness .ubub{font-size:12.5px}
+body.cover #scr-harness .msgs ul,body.cover #scr-harness .msgs ol{margin-left:16px}
+body.cover #scr-harness .thumbs div,body.cover #scr-harness .thumbs img{width:50px;height:50px}
+body.cover #scr-harness .input{margin:6px 8px 6px;padding:9px 9px 8px}
+body.cover #scr-harness .input .ph,body.cover #scr-harness .input textarea{font-size:12.5px}
+body.cover #scr-harness .input .ph{padding-bottom:9px}
+body.cover #scr-harness .chip{padding:4px 7px;font-size:11px}
+body.cover #scr-harness .input .row{gap:4px}
+body.cover #scr-harness .cbtn{width:26px;height:26px}
+body.cover #scr-harness .side .list{-webkit-mask-image:linear-gradient(to top,transparent 0,#000 28px)}
+body.cover #scr-harness .chip.mdl .full{display:none}
+body.inner #scr-harness .chip.mdl .short{display:none}
+body.cover #scr-harness.noside .side{display:none}
+.art{display:flex;align-items:center;gap:8px;border:1px solid #e6e6e9;background:#fafafa;border-radius:12px;padding:8px 10px;margin:2px 0 10px;font-size:12px;cursor:pointer;flex:none}
+.art .ic{width:28px;height:28px;border-radius:7px;background:#14161b;color:#fff;display:flex;align-items:center;justify-content:center;flex:none}
+.art small{display:block;color:#8a8a90;font-size:10.5px}
+.art b{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 对话内容补充（设计稿基础上的 Markdown 元素） */
+#scr-harness .msgs h1,#scr-harness .msgs h2,#scr-harness .msgs h3,#scr-harness .msgs h4{font-size:13.5px;font-weight:600;margin:6px 0 6px;color:#111}
+#scr-harness .msgs ol{margin:0 0 10px 18px;font-size:13.5px;line-height:1.75;color:#222}
+#scr-harness .msgs pre{background:#f6f6f8;border:1px solid #ececef;border-radius:8px;padding:8px 10px;margin:0 0 10px;overflow-x:auto;font-size:11.5px;line-height:1.55}
+#scr-harness .msgs pre code{background:none;padding:0;font-size:11.5px}
+#scr-harness .msgs a{color:var(--ui-primary);text-decoration:none}
+#scr-harness .msgs code.fl{cursor:pointer;text-decoration:underline dotted #b9b9b9;text-underline-offset:3px}
+#scr-harness .msgs table{border-collapse:collapse;font-size:12px;margin:0 0 10px}
+#scr-harness .msgs th,#scr-harness .msgs td{border:1px solid #ececef;padding:4px 8px;text-align:left}
+#scr-harness .msgs blockquote{border-left:3px solid #e3e3e7;padding-left:10px;color:#555;margin:0 0 10px}
+#scr-harness .msgs .think{color:#9a9aa0;font-size:12px;border-left:2px solid #ececef;padding-left:8px;margin:0 0 8px;white-space:pre-wrap;max-height:120px;overflow:hidden}
+#scr-harness .ubub{white-space:pre-wrap;word-break:break-word}
+#scr-harness .ubub.pending{opacity:.6}
+#scr-harness .tool{cursor:pointer;flex:none}
+#scr-harness .tool .tx{overflow:hidden;text-overflow:ellipsis;min-width:0}
+#scr-harness .tool.err b{color:#d4493f}
+#scr-harness .tool .rt{flex:none;display:flex;transition:transform .15s}
+#scr-harness .tool.open .rt{transform:rotate(90deg)}
+#scr-harness .thumbs img{width:58px;height:58px;border-radius:8px;border:1px solid #e5e5e8;object-fit:cover}
+#scr-harness .live:after{content:"▍";color:var(--ui-primary);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+@keyframes rot{to{transform:rotate(360deg)}}
+.spin{animation:rot .9s linear infinite}
+#scr-harness .sysnote{flex:none;font-size:11.5px;color:#9a9aa0;text-align:center;margin:4px 0 10px}
+#scr-harness .welcome{flex:none;margin:auto 0;text-align:center;color:#8a8a90;font-size:12.5px;line-height:1.8;padding:20px 0}
+#scr-harness .welcome b{display:block;font-size:15px;color:#222;margin-bottom:6px}
+#scr-harness .welcome .btn{margin-top:10px}
+#scr-harness .input textarea{display:block;width:100%;border:0;outline:none;resize:none;font:inherit;font-size:13.5px;color:#1d1d1f;background:none;padding:2px 4px 12px;line-height:1.5;max-height:140px;min-height:24px}
+body.inner #scr-harness .input textarea{font-size:13.5px}
+#scr-harness .input textarea::placeholder{color:#a2a2a8}
+#scr-harness .send{cursor:pointer;border:0}
+#scr-harness .send.off{background:#d6d6db}
+#scr-harness .chip{cursor:pointer}
+#scr-harness .chip.ws{color:#555;background:#f2f2f4}
+#scr-harness .cbtn{cursor:pointer}
+#scr-harness .apv{flex:none;border:1px solid #f3d9b8;background:#fffaf3;border-radius:14px;padding:10px 12px;margin:0 0 10px;font-size:12.5px}
+#scr-harness .apv b{display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:3px}
+#scr-harness .apv .why{color:#555;line-height:1.6;word-break:break-word}
+#scr-harness .apv .cmd{margin-top:6px;font-family:ui-monospace,monospace;font-size:11.5px;background:#fff;border:1px solid #f0e2cf;border-radius:7px;padding:5px 8px;white-space:pre-wrap;word-break:break-all;max-height:90px;overflow:auto}
+#scr-harness .apv .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+#scr-harness .q .opts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+#scr-harness .q .opts .btn.on{background:#111;color:#fff;border-color:#111}
+#scr-harness .chat .input{flex:none}
+#scr-harness .dshweb{flex:1;position:relative;background:#fff;display:flex;flex-direction:column;min-width:0}
+#scr-harness .dshweb .lbl{flex:none;display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:11.5px;color:#8a6a1c;background:#fff8e6;border-bottom:1px solid #f3e3b8}
+#scr-harness .dshweb .lbl .btn{margin-left:auto;padding:2px 8px;font-size:11px}
+#scr-harness .dshweb .vp{flex:1;position:relative}
+#scr-harness .dshweb iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+
+/* ===================== 通用按钮 ===================== */
+.btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;border:1px solid #e3e3e7;border-radius:8px;padding:5px 10px;color:#333;background:#fff;white-space:nowrap;cursor:pointer}
+.btn.dk{background:#111;color:#fff;border-color:#111}
+.btn.warn{color:#c0392b;border-color:#f1cfcb}
+.btn:disabled,.btn.dis{opacity:.5}
+
+/* ===================== 设置（设计稿未覆盖，沿用同一视觉语言） ===================== */
+#scr-settings{background:#f6f6f7}
+#scr-settings .body{flex:1;overflow-y:auto;padding:4px 16px 20px;scrollbar-width:none}
+body.inner #scr-settings .body{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start}
+body.cover #scr-settings .body{padding:4px 10px 16px}
+#scr-settings .card{border:1px solid #e8e8eb;border-radius:12px;padding:11px 12px;background:#fff;margin-bottom:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+body.inner #scr-settings .card{margin-bottom:0}
+#scr-settings .card h2{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+#scr-settings .card p,#scr-settings .note{font-size:11.5px;color:#8a8a90;line-height:1.6}
+#scr-settings label{font-size:11.5px;color:#666;display:flex;flex-direction:column;gap:4px}
+#scr-settings input[type=text],#scr-settings input[type=password],#scr-settings input[type=url]{height:32px;border:1px solid #e3e3e7;border-radius:8px;padding:0 10px;font:inherit;font-size:12.5px;color:#1d1d1f;outline:none;background:#fff}
+#scr-settings input:focus{border-color:#b8c6f5}
+#scr-settings .acts{display:flex;gap:8px;flex-wrap:wrap}
+#scr-settings .stat{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#555}
+#scr-settings .sw{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;color:#333;gap:10px}
+#scr-settings .sw small{display:block;color:#8a8a90;font-size:11px}
+.tg{width:34px;height:20px;border-radius:10px;background:#d6d6db;position:relative;flex:none;cursor:pointer;transition:background .15s}
+.tg:after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:left .15s}
+.tg.on{background:var(--ui-primary)}.tg.on:after{left:16px}
+#scr-settings .kvl{font-size:11.5px;color:#555;display:grid;grid-template-columns:auto 1fr;gap:3px 12px}
+#scr-settings .kvl b{font-weight:500;color:#333}
+
+/* ===================== 弹层 / 菜单 / 提示 ===================== */
+#sheet{position:fixed;inset:0;z-index:50;display:none}
+#sheet.on{display:block}
+#sheet .mask{position:absolute;inset:0;background:rgba(0,0,0,.25)}
+#sheet .pane{position:absolute;background:#fff;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+body.cover #sheet .pane{left:0;right:0;bottom:0;top:calc(var(--sat) + 32px);border-radius:16px 16px 0 0;padding-bottom:var(--sab)}
+body.inner #sheet .pane{left:50%;top:50%;transform:translate(-50%,-50%);width:min(560px,86vw);max-height:84vh;border-radius:16px}
+#sheet .pane.full{border-radius:0!important;inset:0!important;transform:none!important;width:auto!important;max-height:none!important;top:0!important;padding:var(--sat) 0 var(--sab)}
+#sheet .sh{display:flex;align-items:center;gap:8px;padding:12px 14px 8px;flex:none}
+#sheet .sh b{flex:1;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#sheet .sh .x{display:flex;cursor:pointer;color:#555;padding:4px}
+#sheet .sb{flex:1;overflow-y:auto;padding:0 14px 14px;min-height:0;display:flex;flex-direction:column}
+#menu{position:fixed;z-index:60;background:#fff;border:1px solid #e6e6e9;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.14);padding:4px;min-width:170px;max-width:300px;max-height:60vh;overflow-y:auto;display:none}
+#menu.on{display:block}
+#menu .mi{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:12.5px;color:#222;cursor:pointer;white-space:nowrap}
+#menu .mi small{color:#9a9aa0;font-size:11px;margin-left:auto;padding-left:10px}
+#menu .mi.on{background:#f2f2f4;font-weight:500}
+#menu .mh{font-size:11px;color:#9a9aa0;padding:6px 10px 2px}
+#menu .msep{height:1px;background:#f0f0f2;margin:4px 6px}
+#menu-mask{position:fixed;inset:0;z-index:59;display:none}
+#menu-mask.on{display:block}
+#toast{position:fixed;left:50%;bottom:calc(var(--sab) + 84px);transform:translateX(-50%);background:rgba(17,17,17,.92);color:#fff;font-size:12.5px;padding:8px 14px;border-radius:18px;z-index:70;opacity:0;pointer-events:none;transition:opacity .2s;max-width:86vw;text-align:center}
+#toast.on{opacity:1}
+.qchart{height:120px;margin:6px 0 10px}
+.qchart svg{width:100%;height:100%}
+
+/* ===================== 自适应：按钮行 / 提示卡 / 对话框（窄宽度不挤压） =====================
+   用容器查询按“所在面板”的宽度判断（外屏 Harness 侧栏会占掉一部分宽度，不能只看视口）。 */
+#scr-harness .chat{container:chat/inline-size}
+#sheet .pane,#scr-settings .card,#scr-harness .rtc,#scr-harness .apv{container-type:inline-size}
+.acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.acts.end{justify-content:flex-end}
+/* 不收缩：放不下就整颗换行；只有单颗比整行还宽时才在按钮内部换行 */
+.acts>.btn{flex:0 0 auto;max-width:100%;white-space:normal;text-align:center;justify-content:center;line-height:1.35;min-height:32px}
+/* 外屏（<600dp）：容器窄于 430px 就纵向堆叠；内屏只有容器真的很窄（<360px）才堆叠 */
+@container (max-width:430px){
+  body.cover .acts.stk{flex-direction:column;align-items:stretch}
+  body.cover .acts.stk>.btn{width:100%;min-height:48px;font-size:14px;border-radius:10px;padding:8px 12px}
+  body.cover .acts.stk>.btn.dk{order:-1}
+}
+@container (max-width:359px){
+  .acts.stk{flex-direction:column;align-items:stretch}
+  .acts.stk>.btn{width:100%;min-height:48px;font-size:14px;border-radius:10px;padding:8px 12px}
+  .acts.stk>.btn.dk{order:-1}
+}
+@supports not (container-type:inline-size){
+  @media (max-width:599px){
+    .acts.stk{flex-direction:column;align-items:stretch}
+    .acts.stk>.btn{width:100%;min-height:48px;font-size:14px;border-radius:10px}
+    .acts.stk>.btn.dk{order:-1}
+  }
+}
+#scr-harness .apv .acts{justify-content:flex-end}
+
+/* 通用提示条（对话区顶部）：标题+正文占满一行，按钮在下方 */
+.ntc{display:flex;flex-direction:column;gap:8px;border-radius:12px;padding:10px 12px;font-size:12.5px;max-width:640px}
+.ntc.warn{background:#fff7f6;border:1px solid #f1cfcb;color:#8a3b33}
+.ntc-h{display:flex;gap:8px;align-items:flex-start}
+.ntc-h>svg{flex:none;margin-top:2px}
+.ntc-t{flex:1;min-width:0}
+.ntc-t b{display:block;font-size:13px;font-weight:600}
+.ntc-t p{margin-top:2px;line-height:1.6;overflow-wrap:anywhere}
+.ntc .acts>.btn{flex:1 0 auto;min-height:40px}
+#scr-harness .bn .ntc{margin:8px 12px 0}
+@container chat (max-width:300px){ .ntc .acts{flex-direction:column;align-items:stretch} .ntc .acts>.btn{width:100%;min-height:48px} }
+
+/* 首次运行 / 运行时状态卡片 */
+#scr-harness .rtc{margin:auto;width:100%;max-width:440px;border:1px solid #e8e8eb;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.05)}
+#scr-harness .rtc-h{display:flex;align-items:center;gap:8px;font-size:15px}
+#scr-harness .rtc-h svg{flex:none}
+#scr-harness .rtc p{font-size:12.5px;color:#555;line-height:1.7;overflow-wrap:anywhere}
+#scr-harness .rts{list-style:none;display:flex;flex-direction:column;gap:7px;padding:8px 10px;margin:0;background:#f7f7f8;border-radius:10px}
+#scr-harness .rts li{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.5}
+#scr-harness .rts li i{flex:none;width:8px;height:8px;border-radius:50%;margin-top:6px;background:#c8c8cc}
+#scr-harness .rts li.ok i{background:#2f9e5b}
+#scr-harness .rts li.bad i{background:#d4493f}
+#scr-harness .rts li span{display:flex;flex-direction:column;min-width:0}
+#scr-harness .rts li small{color:#8a8a90;font-size:11.5px;overflow-wrap:anywhere}
+body.cover #scr-harness .rtc{padding:14px 12px;border-radius:14px}
+
+/* 内嵌 dsh web 的标签条：窄时换行，按钮不挤压文字 */
+#scr-harness .dshweb .lbl{flex-wrap:wrap}
+#scr-harness .dshweb .lbl .tx{flex:1 1 180px;min-width:0;line-height:1.5}
+#scr-harness .dshweb .lbl .btn{flex:none;min-height:32px;padding:4px 10px;font-size:12px}
+
+/* 表单中的手动填写行 */
+.frow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
+.frow input{flex:1 1 160px;min-width:0;height:40px;border:1px solid #e3e3e7;border-radius:8px;padding:0 10px;font:inherit;font-size:14px;outline:none}
+.frow .acts{flex:1 1 auto}
+
+/* 设置页输入框在外屏加高，便于点按 */
+body.cover #scr-settings input{min-height:40px}
+
+/* 外屏 Harness：侧栏随屏宽收窄，给对话区留空间；侧栏可用标题栏图标收起 */
+body.cover #scr-harness .side{width:clamp(120px,32vw,158px)}
+/* 对话区很窄时：权限胶囊只显示图标，保证 + / 权限 / 模型 / 语音 / 发送 一行放得下 */
+@container chat (max-width:300px){
+  #scr-harness .chip.perm .lb{display:none}
+  #scr-harness .chip.perm{padding:4px 6px}
+  #scr-harness .input{margin:6px 6px 6px;padding:8px 8px 7px}
+}
+#scr-harness .input .row{flex-wrap:nowrap;min-width:0}
+#scr-harness .chip{min-width:0;white-space:nowrap}
+#scr-harness .chip.mdl{overflow:hidden;text-overflow:ellipsis}
+body #scr-harness .msgs ul.rts{margin:0!important;padding:8px 10px}
+body.cover #scr-harness.rtoff .side,body.cover #scr-harness.rtoff .dv.a,body.cover #scr-harness.rtoff .input{display:none}
+body.cover #scr-harness.rtoff .msgs{padding:12px}
+/* 并排但可换行、等分填满的按钮行（长文本操作区） */
+.acts.rs>.btn{flex:1 0 auto}
+body.cover .acts.rs>.btn{min-height:44px;font-size:13px}
+#sheet .acts.rs{padding-bottom:10px}
+
+/* ---------- 一体化运行时：内联「正在启动 Harness…」/ 首次准备进度 / 出错重试 / API Key ---------- */
+#scr-harness .rtx{container-type:inline-size;margin:0 auto 12px;width:100%;max-width:440px;display:flex;flex-direction:column;gap:8px;font-size:13px;color:#555}
+#scr-harness .msgs .rtx:first-of-type{margin-top:auto}
+#scr-harness .rtx p{display:flex;align-items:center;gap:8px;line-height:1.6;overflow-wrap:anywhere;margin:0}
+#scr-harness .rtx .spin{width:14px;height:14px;flex:none}
+#scr-harness .rtx .bar{height:4px;border-radius:2px;background:#ececef;overflow:hidden}
+#scr-harness .rtx .bar>i{display:block;height:100%;background:#111;border-radius:2px;transition:width .3s}
+#scr-harness .rtx small{color:#8a8a90;font-size:11.5px;line-height:1.5}
+#scr-harness .rtx.bad{border:1px solid #f1cfcb;background:#fff7f6;color:#8a3b33;border-radius:12px;padding:12px}
+#scr-harness .rtx.key{border:1px solid #e8e8eb;border-radius:14px;padding:14px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.05)}
+#scr-harness .rtx.key b{font-size:14px;color:#111}
+#scr-harness .rtx.key input{width:100%;height:44px;border:1px solid #dcdce0;border-radius:10px;padding:0 12px;font-size:14px;background:#fafafa;box-sizing:border-box}
+#scr-harness .rtx .acts>.btn{min-height:44px;flex:1 0 auto}
+@container (max-width:359px){ #scr-harness .rtx .acts>.btn{width:100%;min-height:48px} }
+.ntc.info{background:#f6f7f9;border:1px solid #e6e7ea;color:#444}
+.ntc-h>.spin{flex:none;width:13px;height:13px;margin-top:3px}
+/* 设置 › 高级 */
+#scr-settings details.adv>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;min-height:44px}
+#scr-settings details.adv>summary::-webkit-details-marker{display:none}
+#scr-settings details.adv>summary::after{content:'›';margin-left:auto;font-size:18px;color:#999;transition:transform .2s}
+#scr-settings details.adv[open]>summary::after{transform:rotate(90deg)}
+#scr-settings pre.log{max-height:260px;overflow:auto;background:#f6f6f8;border-radius:8px;padding:8px;font-size:11px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+#scr-harness .rtx .spin,.ntc-h>.spin{display:inline-block;border:2px solid #d9d9de;border-top-color:#111;border-radius:50%;box-sizing:border-box}
+
+/* ===================== Harness 追问卡 ===================== */
+#scr-harness .qcard [hidden]{display:none!important}
+#scr-harness .qcard{flex:none;margin:0 0 10px;padding:12px;border:1px solid #e4e6eb;border-radius:14px;background:#f8f9fb;color:#1d1d1f;overflow-wrap:anywhere}
+#scr-harness .qcard.qopen{border-color:#dfe3ea;background:#f8f9fb}
+#scr-harness .qcard.qwaiting{background:#fafafa;border-style:dashed}
+#scr-harness .qcard.qdone{background:#fff;border-color:#ececef}
+#scr-harness .qhead{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap}
+#scr-harness .qhead b{display:flex;align-items:center;gap:6px;flex:1;min-width:0;font-size:13px;line-height:1.4}
+#scr-harness .qhead b svg{flex:none}
+#scr-harness .qcount,#scr-harness .qbadge{flex:none;font-size:10.5px;line-height:1.4;padding:2px 7px;border-radius:9px;background:#eef0f4;color:#666;white-space:nowrap}
+#scr-harness .qbadge{background:#fff;border:1px solid #e4e6eb;color:#777}
+#scr-harness .qwait{display:flex;align-items:flex-start;gap:6px;margin-top:9px;padding:8px 9px;border-radius:9px;background:#f1f2f5;color:#666;font-size:11.5px;line-height:1.55}
+#scr-harness .qwait svg{flex:none;margin-top:1px}
+#scr-harness .qitem{margin-top:9px;padding-top:10px;border-top:1px solid #e8e9ed;min-width:0}
+#scr-harness .qitem:first-of-type{border-top:0;padding-top:2px}
+#scr-harness .qmeta{display:flex;align-items:center;gap:7px;font-size:10.5px;color:#8a8a90;line-height:1.4}
+#scr-harness .qmeta span+span:before{content:"·";margin-right:7px;color:#c2c2c8}
+#scr-harness .qheading{margin-top:5px;font-size:11.5px;font-weight:600;color:#555;line-height:1.5}
+#scr-harness .qq{margin-top:3px;font-size:13px;font-weight:600;line-height:1.6;color:#1d1d1f;white-space:pre-wrap}
+#scr-harness .qdetail{margin-top:5px;color:#555;font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+#scr-harness .qdetail p,#scr-harness .qdetail ul,#scr-harness .qdetail ol,#scr-harness .qdetail h1,#scr-harness .qdetail h2,#scr-harness .qdetail h3,#scr-harness .qdetail h4{font-size:inherit;line-height:inherit;color:inherit;margin:0 0 6px}
+#scr-harness .qdetail ul,#scr-harness .qdetail ol{margin-left:17px}
+#scr-harness .qdetail pre{font-size:11px;margin-bottom:6px;max-height:180px}
+#scr-harness .qdetail blockquote{margin-bottom:6px}
+#scr-harness .qopts{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+#scr-harness .qopt{display:flex;align-items:flex-start;gap:9px;width:100%;min-height:42px;box-sizing:border-box;padding:9px 10px;border:1px solid #e1e3e8;border-radius:10px;background:#fff;color:#222;text-align:left;font:inherit;cursor:pointer;transition:border-color .15s,background .15s}
+#scr-harness .qopt:active{background:#f5f6f8}
+#scr-harness .qopt.on{border-color:#111;background:#f4f5f8;box-shadow:inset 0 0 0 1px #111}
+#scr-harness .qopt:disabled{cursor:default;opacity:.62}
+#scr-harness .qdot{display:block;flex:none;width:16px;height:16px;margin-top:1px;border:1.5px solid #b9bcc4;border-radius:50%;background:#fff;box-sizing:border-box}
+#scr-harness .qopt.on .qdot{border-color:#111;background:#111;box-shadow:inset 0 0 0 3px #fff}
+#scr-harness .qoptmain{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+#scr-harness .qoptmain b{font-size:12.5px;line-height:1.45;font-weight:600}
+#scr-harness .qoptmain small{display:block;color:#777;font-size:11px;line-height:1.5;white-space:pre-wrap}
+#scr-harness .qcustom{display:flex;flex-direction:column;gap:5px;margin-top:8px;min-width:0}
+#scr-harness .qcustom>span{color:#777;font-size:10.5px;line-height:1.5}
+#scr-harness input[data-qreply],#scr-harness textarea[data-qreply]{display:block;width:100%;height:42px;min-height:42px;box-sizing:border-box;resize:none;border:1px solid #dcdde3;border-radius:9px;background:#fff;padding:0 10px;font:inherit;font-size:13px;line-height:40px;color:#1d1d1f;outline:none;white-space:nowrap;overflow-x:auto;overflow-y:hidden;text-overflow:clip;user-select:text;-webkit-user-select:text}
+#scr-harness textarea[data-qreply]{padding-top:0;padding-bottom:0;line-height:40px}
+#scr-harness input[data-qreply]::placeholder,#scr-harness textarea[data-qreply]::placeholder{color:#a2a2a8}
+#scr-harness input[data-qreply]:focus,#scr-harness textarea[data-qreply]:focus{border-color:#8b8e98;box-shadow:0 0 0 2px rgba(17,17,17,.06)}
+#scr-harness input[data-qreply]:disabled,#scr-harness textarea[data-qreply]:disabled{background:#f5f5f6;color:#888}
+#scr-harness .qskipnote{margin-top:7px;padding:6px 8px;border-radius:7px;background:#f1f2f5;color:#666;font-size:11px;line-height:1.5}
+#scr-harness .qitembar{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;margin-top:6px}
+#scr-harness .qskip,#scr-harness .qcustomtoggle{min-height:32px;padding:4px 9px;font-size:11.5px;color:#555;border-color:#dfe1e6;background:#fff}
+#scr-harness .qerr{margin-top:9px;padding:8px 9px;border:1px solid #f0cbc7;border-radius:8px;background:#fff7f6;color:#a03d34;font-size:11.5px;line-height:1.55}
+#scr-harness .qaccepted{margin-top:9px;padding:8px 9px;border:1px solid #d8eadc;border-radius:8px;background:#f5fbf6;color:#2f6e41;font-size:11.5px;line-height:1.55}
+#scr-harness .qfoot{display:flex;flex-direction:column;gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid #e8e9ed}
+#scr-harness .qhint{width:100%;min-width:0;color:#777;font-size:11px;line-height:1.5}
+#scr-harness .qnav{display:flex;flex-wrap:wrap;gap:8px;width:100%;min-width:0}
+#scr-harness .qnavbtn{flex:1 1 88px;min-width:0;min-height:44px;height:44px;box-sizing:border-box;padding:0 12px;border-radius:9px;font-size:12.5px;white-space:nowrap}
+#scr-harness .qsubmit{flex:1 1 88px;margin-left:0;min-height:44px}
+#scr-harness .qsubmit:disabled{cursor:default;opacity:.48}
+#scr-harness .qread{border-top:0;padding-top:2px}
+#scr-harness .qitem.qread+.qitem.qread{border-top:1px solid #e8e9ed;padding-top:9px;margin-top:9px}
+#scr-harness .qreadtop{display:flex;align-items:flex-start;gap:8px;min-width:0}
+#scr-harness .qreadidx{flex:none;display:flex;align-items:center;justify-content:center;width:19px;height:19px;margin-top:1px;border-radius:50%;background:#eef0f4;color:#777;font-size:10.5px;line-height:1}
+#scr-harness .qreadbody{flex:1;min-width:0}
+#scr-harness .qreadh{margin-bottom:2px;color:#777;font-size:11px;line-height:1.45}
+#scr-harness .qreadq{font-size:12px;font-weight:600;line-height:1.55;color:#333;white-space:pre-wrap}
+#scr-harness .qanswer{display:flex;flex-direction:column;gap:5px;margin-top:5px;padding:6px 8px;border-radius:8px;background:#f5f6f8}
+#scr-harness .qansline{display:flex;align-items:flex-start;gap:8px;font-size:11.8px;line-height:1.55}
+#scr-harness .qanslabel{flex:none;color:#888;font-size:10.5px;line-height:1.7}
+#scr-harness .qanschips{display:flex;flex-wrap:wrap;gap:5px;min-width:0}
+#scr-harness .qanschip{display:inline-block;padding:2px 7px;border:1px solid #dfe1e6;border-radius:8px;background:#fff;color:#222;font-size:11.5px;line-height:1.5}
+#scr-harness .qcustext{min-width:0;color:#333;white-space:pre-wrap;overflow-wrap:anywhere}
+#scr-harness .qskipped,#scr-harness .qmissing{margin-top:4px;color:#777;font-size:11.2px;line-height:1.55}
+#scr-harness .qnote{margin-top:8px;padding:8px 9px;border-radius:8px;background:#f3f4f6;color:#666;font-size:11.5px;line-height:1.55}
+#scr-harness .qraw{margin-top:7px;padding:7px 8px;max-height:120px;overflow:auto;border-radius:7px;background:#f4f4f6;color:#555;font-family:ui-monospace,'JetBrains Mono',monospace;font-size:10.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+#scr-harness .qpreviewopts{display:flex;flex-direction:column;gap:5px;margin-top:7px}
+#scr-harness .qpreviewopt{padding:7px 9px;border:1px solid #e4e5e9;border-radius:8px;background:#fafafa;font-size:12px;line-height:1.5}
+#scr-harness .qpreviewopt b{display:block;font-weight:600;color:#333}
+#scr-harness .qpreviewopt small{display:block;margin-top:2px;color:#777;font-size:11px}
+#scr-harness .qcard button:focus-visible,#scr-harness .qcard input:focus-visible,#scr-harness .qcard textarea:focus-visible{outline:2px solid #111;outline-offset:2px}
+body.cover #scr-harness .qcard{padding:10px;border-radius:12px}
+body.cover #scr-harness .qopt{padding:9px}
+body.cover #scr-harness .qnavbtn,body.cover #scr-harness .qsubmit{min-height:44px;padding:0 12px;font-size:12.5px}
+@container chat (max-width:320px){
+  #scr-harness .qhead .qbadge{display:none}
+  #scr-harness .qnavbtn{flex-basis:100%}
+}
+/* Messages awaiting a confirmed session event. */
+.pending-state{display:block;margin-top:6px;font-size:11px;color:#7e8690;line-height:1.5}.pending-state .btn{font-size:11px;padding:3px 7px}
+.rail .logo{cursor:pointer}
+.reasoning-fold{margin:8px 0 12px;color:#83878f;font-size:12px}.reasoning-fold>summary,.result-fold>summary{cursor:pointer;min-height:40px;padding:9px 3px;list-style:none;display:flex;align-items:center;gap:8px}.reasoning-fold>summary:before,.result-fold>summary:before{content:'›';font-size:16px;line-height:1;transition:transform .15s}.reasoning-fold[open]>summary:before,.result-fold[open]>summary:before{transform:rotate(90deg)}.reasoning-fold .think{margin:0 0 8px;padding:8px 12px;border-left:2px solid #e2e5eb;line-height:1.7}.tool-steps{margin:0 0 12px 5px;padding:2px 0 4px 13px;border-left:1px solid #e4e7ed}.tool-step{padding:6px 0 10px;font-size:12px;min-width:0}.step-title{font-weight:600;color:#626871}.step-command{font-size:11px;color:#949aa2;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:4px}.result-fold{margin-top:1px}.result-fold>summary{color:#7f8792;font-size:11px}.result-fold pre{max-height:320px;overflow:auto;margin:0;padding:12px;border-radius:10px;background:#f4f5f7;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.7 ui-monospace,monospace;color:#626873}
+
+.process-fold{margin:8px 0 14px;color:#737b87;font-size:12px}.process-fold>summary{display:flex;align-items:center;gap:9px;min-height:44px;cursor:pointer;list-style:none}.process-fold>summary:after{content:'›';font-size:18px;display:inline-block;transition:transform .15s}.process-fold[open]>summary:after{transform:rotate(90deg)}.process-fold>summary small{font-size:11px;color:#9aa0aa}.process-content{padding:0 0 3px 14px;border-left:1px solid #e4e7ed}.process-content>.mdw{font-size:12px;color:#7c8490}.process-content .tool{margin-left:0}.process-fold summary::-webkit-details-marker{display:none}
+/* A narrow chat beside the preview still keeps the send control inside its row. */
+#scr-harness .input .chip.mdl{flex:0 1 auto;min-width:28px}
+@container chat (max-width:360px){
+  #scr-harness .input .chip.perm .lb{display:none}
+  #scr-harness .input .chip.perm{padding:4px 6px}
+}
+
+#scr-harness .history-more{align-self:center;margin:8px 0 16px}
+
+/* Platform menu is owned by the Android host. */
+body.native-platform .rail,body.native-platform .tbar2{display:none!important}

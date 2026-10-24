@@ -1,0 +1,102 @@
+# Core-only 构建与测试
+
+以下命令假设从 `scripts/release/export-source.py` 导出的新目录开始，不复制开发者缓存、签名密钥、`.env`、数据库、已安装插件或用户目录。宿主构建需要 Python 3.11+、Node.js 22+ / npm 10+、JDK 17、Android SDK Platform 37、AGP 对应 Build Tools、首次运行时下载和网络、约 12 GB 可用空间；构建宿主本身不需要 ARM64。`compileSdk=37` 对应 SDK Manager 包名 `platforms;android-37.0`。
+
+## 1. 无网络发布工具回归
+
+```sh
+python3 -m unittest discover -s scripts/release-tests
+```
+
+该组测试使用 Python 标准库和仓库 fixture，验证 core-only 导出 allowlist、显式二进制准入与许可渲染器行为。
+
+## 2. Android 宿主与固定运行时
+
+```sh
+python3 scripts/release/fetch-native.py --cache .rtbuild/native
+bash android/tools/runtime/build-runtime.sh
+cd android
+./gradlew --no-daemon testDebugUnitTest lintRelease assembleRelease
+cd ..
+python3 scripts/check-app-distribution.py android/app/build/outputs/apk/release/app-release-unsigned.apk
+```
+
+运行时由锁定的 Debian ARM64 层、Node.js、独立 npm 包和 DSH package-lock 构建。下载摘要由锁文件校验；DSH 使用 `npm ci --ignore-scripts`。工作区、权限、历史检索、Bot 通信和文件发布补丁位于 `fixed_workspace.py`、`pack.py` 与 overlay。Release/Debug 资产合并会校验 runtime manifest 记录的源输入集合与摘要（包括下载脚本和构建入口）；源码或 overlay 变更后必须重新打包，并更新实际第三方声明。未生成 `android/runtime-assets/runtime/runtime.tar.xz` 与固定 `jniLibs` 时，不能得到可安装 APK。
+
+固定的 Termux 原生依赖及其完整对应源码、构建配方随 `scripts/release/native-inputs/` 提供，每份都以 `native-lock.json` 的 SHA-256 校验。它们是上游原始输入，不是开发者生成的 `.so` 或运行时缓存；无需依赖会移除旧版本的滚动软件源。Node、Debian 和 npm 依赖仍由网络按锁文件下载。
+
+图片处理依赖虽然由上游 npm 声明为 optional，在本 ARM64 宿主中仍是实际必需项。下载明确包含 optional；下载后和打包前都按锁文件核对 sharp、ARM64 addon 与 libvips，并检查原生库为 ARM64 ELF。缺包或错误架构直接失败，不能把 npm 的成功退出当作目标依赖齐全。Mac 文件元数据不会进入运行时或源输入清单。
+
+Gradle 使用 `android/gradle/verification-metadata.xml` 校验构建插件与依赖制品。升级依赖须审查来源、更新校验文件和许可清单，不能为绕过失败关闭校验。
+
+在 ARM 宿主上通过 QEMU 运行 x86_64 Linux 时，本轮发现 OpenJDK 17 的 C2 即时编译代码在 R8 阶段触发 `SIGILL`，不属于 Android 源码编译错误。该环境可在构建进程中使用 `JAVA_TOOL_OPTIONS='-XX:+TieredCompilation -XX:TieredStopAtLevel=1 -XX:UseAVX=0'`，限制为 C1 编译后重新运行原命令；不关闭 R8、lint、依赖校验或 APK 优化，也不把这些主机选项写入 App。原生 Linux 构建不默认需要这些选项。 本轮另观察到该 QEMU 环境在整组 C1 检查中长时间未见进展。保留已经完成的 R8 输出（实际确认 `minifyReleaseWithR8 UP-TO-DATE`）后，改用 `JAVA_TOOL_OPTIONS='-XX:UseAVX=0'` 和 `--max-workers=1` 重跑原完整检查与出包已通过；没有跳过检查。原因尚未最终定位，这只是本轮分阶段恢复记录，不是对原生 Linux 的默认要求。
+
+
+构建消费运行时的方式：`pack.py` 的临时归档与进程锁位于 `android/build/runtime-pack`，不进入资产根。完整归档与 manifest 成对发布；Gradle 的 `prepareRuntimeAssets` 从已打开文件复制并核对独立副本，只把 `runtime.json` 和 `runtime.tar.xz` 放入 `app/build/generated/runtime-assets/runtime`。资产合并消费这个稳定快照，源文件被并发替换时不会重读另一份归档；捕获到混合版本则明确失败，保留上一份有效快照。Debug 与 Release 均依赖此任务；源输入变化仍必须重打包。源输入、许可和依赖守卫分别挂在无输出的 `preDebugBuild` / `preReleaseBuild`，不依赖增量资产合并是否执行；即使合并输出未变，修改 producer 或 overlay 后不重打包也会明确失败。
+
+## 3. 现有离线测试
+
+```sh
+node scripts/page-framework-tests/run.mjs
+node --experimental-vm-modules --disable-warning=ExperimentalWarning scripts/interaction-tests/run.mjs
+node scripts/chat-scroll-tests/chat-scroll.test.mjs
+node scripts/skill-runtime-tests/skill-disclosure.test.mjs
+node scripts/test-model-editor.mjs
+python3 -m unittest discover -s scripts/release-tests
+```
+
+生成 `.rtbuild/dl/dsh` 后运行依赖真实 DSH 编译器的检查：
+
+```sh
+PD_DSH_VENDOR_ROOT=.rtbuild/dl/dsh python3 scripts/workspace-tests/check-policy.py
+PD_DSH_VENDOR_ROOT=.rtbuild/dl/dsh node scripts/check-runtime-tool-schemas.mjs
+PD_DSH_VENDOR_ROOT=.rtbuild/dl/dsh node --experimental-loader ./scripts/plugin-tests/vendor-loader.mjs --test scripts/plugin-tests/*.test.mjs
+PD_DSH_VENDOR_ROOT=.rtbuild/dl/dsh node --test scripts/skill-runtime-tests/source-fidelity.test.mjs scripts/workspace-tests/mcp-redirect.test.mjs scripts/workspace-tests/fflate-zip64.test.mjs
+```
+
+## 4. 插件包与设备验收
+
+业务插件不随仓库提供。第三方插件可放在任意源码目录，每个插件包含 `web/plugin.json`，可选根级 `main.mjs` 作为原生动作：
+
+```sh
+node scripts/build-page-plugins.mjs <插件源码根目录> --out <输出目录>
+```
+
+构建器校验 API 版本、公共框架引用、资源路径、导入闭包和 2 MiB 上限，输出独立 JSON 包；不会把插件写入 APK assets。
+
+专用 ARM64 模拟器可运行 `PluginDeviceTest` 合成 fixture，覆盖页面缓存、媒体方向、预览生命周期、后台计划、通知、移除恢复、许可窗口和插件契约。构建并安装 Debug 与 androidTest APK 后：
+
+```sh
+adb -s <emulator> shell am instrument -w -e scenario previewLifecycle com.personaldashboard.core.debug.test/com.personaldashboard.app.PluginDeviceTest
+```
+
+真实设备仍须验收 ARM64 运行时、后台驻留、系统通知、WebView 行为、宿主 TTS 和用户自己的插件安装。androidTest 与合成 fixture 默认只用于专用模拟器；实体手机上的临时测试须获得机主授权，使用独立安装身份，保留已有数据并在验收后清理。
+
+## 5. 发布材料
+
+- 使用 `python3 scripts/release/export-source.py <新目录>` 生成可重复 core-only 源码树；目标目录必须不存在，防止覆盖旧发布。
+- 使用 `scripts/release/generate-sbom.py` 基于实际许可证目录与 Debian 对应源码生成 SBOM。
+- 使用 `scripts/release/render-notices.py` 与 `complete-license-metadata.py` 处理实际 runtime/Android 依赖声明。
+- 发布 APK 必须与公开源码、固定 runtime 输入和第三方源码/许可材料一一对应；不能用私人全量 APK 冒充本仓库构建。
+- 第三方对应源码归档生成后，执行 `python3 scripts/release/normalize-source-archive.py <原始.tar.gz> <新的公开.tar.gz>`。发布规范化后的文件，逐项复核 `SOURCE_INDEX.json` 中的内容摘要；不要直接分发本机 `tar.add` 生成、带用户名或 PAX 私人路径的归档。规范化只清理外层归档元数据，保留上游源码与许可证原文。
+
+本项目固定运行时输入版本和下载摘要，不承诺两次构建产生字节完全相同的 APK/runtime；发布记录保存实际产物摘要。
+
+
+## 6. 发布签名与恢复
+
+发布签名密钥和口令文件保存在工程之外，以私有权限保护，不进入源码、公开产物、日志或普通备份。后续升级沿用同一发布身份；遗失私钥无法直接覆盖原包。调试签名不替代发布签名。
+
+构建未签名 Release 后，可使用 Android SDK Build Tools 签名；下列变量只引用发布者自己的私有文件，不包含实际秘密：
+
+```sh
+zipalign -c -P 16 4 android/app/build/outputs/apk/release/app-release-unsigned.apk
+apksigner sign --ks "$YUGANG_KEYSTORE" --ks-key-alias "$YUGANG_KEY_ALIAS" \
+  --ks-pass "file:$YUGANG_STORE_PASSWORD_FILE" \
+  --out yugang-core-release.apk android/app/build/outputs/apk/release/app-release-unsigned.apk
+apksigner verify --verbose --print-certs yugang-core-release.apk
+```
+
+保存签名 APK、源码归档、runtime、许可材料与 SBOM 的摘要及公开证书指纹。比较签名前后 ZIP 的原成员内容；只允许增加签名元数据，不更换代码或资源。设备安装后再次核对 APK 摘要、包名、版本和非 Debuggable 状态。
+
+公开 Core 包名独立于私人完整版。首次安装前确认目标包不存在，验收冷启动、运行时初始化、空白配置、默认 Bot、无业务插件和强停重启；不能用既有完整版覆盖安装代替。临时空白验收包清理时仅卸载本轮创建的 Core，不能卸载或清空原 App。回退代码只恢复本次修改文件并重建；原有安装通过同包同证书保留数据覆盖，必要时使用更高版本码，不能用清数据绕过兼容问题。

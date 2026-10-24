@@ -1,0 +1,196 @@
+{
+  "archives": [
+    {
+      "url": "https://github.com/frida/proxy-libintl/archive/0.5.tar.gz",
+      "file": "sharp-dependencies/c0aed89de3-0.5.tar.gz",
+      "sha256": "f7a1cbd7579baaf575c66f9d99fb6295e9b0684a28b095967cfda17857595303"
+    },
+    {
+      "url": "https://gist.github.com/kleisauke/284d685efa00908da99ea6afbaaf39ae/raw/bdad5489a61c217850631571caf57f5db6ea8b2c/glib-without-gregex.patch",
+      "file": "sharp-dependencies/2ea8965de9-glib-without-gregex.patch",
+      "sha256": "b1f2930a11292e529de137c7eb723850e0cc0969b1a2b0358196389312acd272"
+    },
+    {
+      "url": "https://github.com/libexif/libexif/releases/download/v0.6.26/libexif-0.6.26.tar.xz",
+      "file": "sharp-dependencies/d204d1d370-libexif-0.6.26.tar.xz",
+      "sha256": "4a055ed6575e61ca46c3172be3c753cc16c9becd0f99ec71d58dd0e471476c0c"
+    },
+    {
+      "url": "https://github.com/zlib-ng/zlib-ng/archive/2.3.3.tar.gz",
+      "file": "sharp-dependencies/7f7f039573-2.3.3.tar.gz",
+      "sha256": "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1"
+    },
+    {
+      "url": "https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz",
+      "file": "sharp-dependencies/c0c76e912d-libffi-3.8.0.tar.gz",
+      "sha256": "7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4"
+    },
+    {
+      "url": "https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.4.tar.xz",
+      "file": "sharp-dependencies/f395c8ee87-libxml2-2.15.4.tar.xz",
+      "sha256": "98087fd181d9070724f3fbc65c7377db03038eb92bd882374daff44940138821"
+    },
+    {
+      "url": "https://github.com/mozilla/mozjpeg/commit/f90668e0e4fb79c81e1f24a0ccc0e2090af761bf.patch",
+      "file": "sharp-dependencies/b5d9ae7089-f90668e0e4fb79c81e1f24a0ccc0e2090af761bf.patch",
+      "sha256": "a65f87cadf3a6052e44d6314c906f6e2891352f82646b8a6f0b8fcf2c1891e7c"
+    },
+    {
+      "url": "https://github.com/mozilla/mozjpeg/archive/0826579.tar.gz",
+      "file": "sharp-dependencies/0d0122bb4a-0826579.tar.gz",
+      "sha256": "b680167bd5d9afebdd576a12f8c49d2c9066a3b92ef96a2b2c5f7829b8600fe5"
+    },
+    {
+      "url": "https://github.com/strukturag/libheif/releases/download/v1.23.5/libheif-1.23.5.tar.gz",
+      "file": "sharp-dependencies/0a02487f4e-libheif-1.23.5.tar.gz",
+      "sha256": "fd9036064c4432f0550d15072ddf34956a248279ee9aeaff0fba3fa0f77d8f1a"
+    },
+    {
+      "url": "https://download.gnome.org/sources/glib/2.90/glib-2.90.0.tar.xz",
+      "file": "sharp-dependencies/c89c4b6083-glib-2.90.0.tar.xz",
+      "sha256": "17d15cac2af80a33271127408e0abc2748eb297c595c2a26409e81e14e7d1b8f"
+    },
+    {
+      "url": "https://github.com/lovell/libimagequant/archive/v2.4.1.tar.gz",
+      "file": "sharp-dependencies/6dcbd089a8-v2.4.1.tar.gz",
+      "sha256": "47d2a84b7b1052975c9d50a3d4e3cacbf57b43d84a4c3131210848ead9964dfb"
+    },
+    {
+      "url": "https://github.com/mm2/Little-CMS/releases/download/lcms2.19.1/lcms2-2.19.1.tar.gz",
+      "file": "sharp-dependencies/bfa4c88bb2-lcms2-2.19.1.tar.gz",
+      "sha256": "bfc54f7bab59fbc921012014a8032e4cba4abd46db47d46b76416a8c0b2815c8"
+    },
+    {
+      "url": "https://github.com/pnggroup/libpng/archive/v1.6.58.tar.gz",
+      "file": "sharp-dependencies/988e326b75-v1.6.58.tar.gz",
+      "sha256": "a9d4df463d36a6e5f9c29bd6f4967312d17e996c1854f3511f833924eb1993cf"
+    },
+    {
+      "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz",
+      "file": "sharp-dependencies/3054e502a2-expat-2.8.5.tar.xz",
+      "sha256": "1e727b8933ec51a77a9a9d9afcf8e688bce45d907c13e36ab7393fe36e703182"
+    },
+    {
+      "url": "https://storage.googleapis.com/aom-releases/libaom-3.15.1.tar.gz",
+      "file": "sharp-dependencies/da7971bb1d-libaom-3.15.1.tar.gz",
+      "sha256": "8ca0c52746174603500f0adb6f2a215d69c9ca2aab2acb3caa06fb791d8d01bf"
+    },
+    {
+      "url": "https://gitlab.com/libtiff/libtiff/-/archive/v4.7.2/libtiff-v4.7.2.tar.gz",
+      "file": "sharp-dependencies/2717443c7b-libtiff-v4.7.2.tar.gz",
+      "sha256": "62b15f44c10106065211efa22a2dc77937bd97ee1f6e3afd2c9659010de112eb"
+    },
+    {
+      "url": "https://github.com/freetype/freetype/archive/VER-2-14-3.tar.gz",
+      "file": "sharp-dependencies/be01d2b4df-VER-2-14-3.tar.gz",
+      "sha256": "dc49de6b01a266eef4876a4dd34d9842c475d3e28ff2eff63bd2fb760ab56261"
+    },
+    {
+      "url": "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/archive/2.18.3/fontconfig-2.18.3.tar.gz",
+      "file": "sharp-dependencies/2495609b7f-fontconfig-2.18.3.tar.gz",
+      "sha256": "9ae01e1d53acdef56010c5451cd34aa41d325b2faccd8606448d8fa01b2496b3"
+    },
+    {
+      "url": "https://github.com/google/highway/archive/1.4.0.tar.gz",
+      "file": "sharp-dependencies/39b2dedd66-1.4.0.tar.gz",
+      "sha256": "e72241ac9524bb653ae52ced768b508045d4438726a303f10181a38f764a453c"
+    },
+    {
+      "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
+      "file": "sharp-dependencies/3835b73bff-libwebp-1.6.0.tar.gz",
+      "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564"
+    },
+    {
+      "url": "https://cairographics.org/releases/pixman-0.46.4.tar.gz",
+      "file": "sharp-dependencies/b02fe6d03b-pixman-0.46.4.tar.gz",
+      "sha256": "d09c44ebc3bd5bee7021c79f922fe8fb2fb57f7320f55e97ff9914d2346a591c"
+    },
+    {
+      "url": "https://github.com/fribidi/fribidi/releases/download/v1.0.17/fribidi-1.0.17.tar.xz",
+      "file": "sharp-dependencies/cf04ebba3a-fribidi-1.0.17.tar.xz",
+      "sha256": "6949dcde27d41cebad1fd741fcafc36d55a1020d2d872d4a6eb3914caabbada2"
+    },
+    {
+      "url": "https://github.com/GNOME/librsvg/commit/9106011db93d701728ac2c9da50c9ab2c1bb5dc6.patch",
+      "file": "sharp-dependencies/49a41f975e-9106011db93d701728ac2c9da50c9ab2c1bb5dc6.patch",
+      "sha256": "8b841d2ec8feb964fa76859075e0e0c41b69136ba143cf0d26469d9bebc19231"
+    },
+    {
+      "url": "https://github.com/libarchive/libarchive/releases/download/v3.8.9/libarchive-3.8.9.tar.xz",
+      "file": "sharp-dependencies/4c8ceb2336-libarchive-3.8.9.tar.xz",
+      "sha256": "888c934f9d95648ecb9163dc8e23ab80a476ecb81a8f1154704a227b5b676dde"
+    },
+    {
+      "url": "https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz",
+      "file": "sharp-dependencies/d2b5992c45-pango-1.58.2.tar.xz",
+      "sha256": "342385b6ca3b7c73455d7c80a13b7dbe4489e00bc3bd4c5bd6ed4dce421e374a"
+    },
+    {
+      "url": "https://github.com/dloebl/cgif/archive/v0.5.4.tar.gz",
+      "file": "sharp-dependencies/b37f66ae43-v0.5.4.tar.gz",
+      "sha256": "83a70a15bc2da41f081a44ebc58ee48e2e1d524a6d3fdb4a24064afa08d5ad4d"
+    },
+    {
+      "url": "https://patch-diff.githubusercontent.com/raw/google/libultrahdr/pull/383.patch",
+      "file": "sharp-dependencies/eb5c3a006b-383.patch",
+      "sha256": "57658db2a11ae964755e513b01db21bcfa408c350b11b3a6ef9bc8576fb749ba"
+    },
+    {
+      "url": "https://gist.githubusercontent.com/lovell/313a6901e9db1bf285f2a1f1180499e4/raw/3988223c7dfa4d22745d9392034b0117abef1446/libvips-cpp-soversion.patch",
+      "file": "sharp-dependencies/c7620b4dd9-libvips-cpp-soversion.patch",
+      "sha256": "256b7d6f8c973bb53b20cff5171c7117d6b35d3aa4e72d22cb906f4fe1e2c890"
+    },
+    {
+      "url": "https://github.com/google/libultrahdr/archive/v2.0.2.tar.gz",
+      "file": "sharp-dependencies/e435885987-v2.0.2.tar.gz",
+      "sha256": "aa8d193bb887c348c419780511dd03b374f4e07af8812b6d3f80c8537cf1ef2c"
+    },
+    {
+      "url": "https://download.gnome.org/sources/librsvg/2.63/librsvg-2.63.2.tar.xz",
+      "file": "sharp-dependencies/0422e43fe3-librsvg-2.63.2.tar.xz",
+      "sha256": "852b18e1a00b8605528825a27dc7748bff2a5dd254028f59dc22a34ea57e81b6"
+    },
+    {
+      "url": "https://github.com/libvips/libvips/releases/download/v8.18.7/vips-8.18.7.tar.xz",
+      "file": "sharp-dependencies/80da7ba048-vips-8.18.7.tar.xz",
+      "sha256": "5baaead3b0bb20ffdb9e9ff09aa9fda08620923df77b63b436654cb5e0b3bf94"
+    },
+    {
+      "url": "https://cairographics.org/releases/cairo-1.18.6.tar.xz",
+      "file": "sharp-dependencies/d0646ec9ec-cairo-1.18.6.tar.xz",
+      "sha256": "1c767308174337a74694da0f3ec069c271452163a1ef4540964c50c301f157d4"
+    },
+    {
+      "url": "https://github.com/harfbuzz/harfbuzz/archive/14.5.0.tar.gz",
+      "file": "sharp-dependencies/6faa085a00-14.5.0.tar.gz",
+      "sha256": "97ec7488a46b974e18e08ee774af93173e7e1dbf738424796eb315ebcb735ec5"
+    },
+    {
+      "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1.tar.xz",
+      "file": "node-v24.22.1.tar.xz",
+      "sha256": "4f5379796280cdaeb0c2f358fd04b6a16cc4fb7dfa83b5a8c91a9d963b435231"
+    },
+    {
+      "url": "https://codeload.github.com/deepseek-ai/dsh-libreoffice-kit/tar.gz/b19bb73c74ed893b8a5d1716d32df32a113ed31b",
+      "file": "dsh-libreoffice-kit-b19bb73c74ed893b8a5d1716d32df32a113ed31b.tar.gz",
+      "sha256": "33839347e44b8df44c59115b566e9664e7db04a612a8f37ee2b220d7e501c036",
+      "npmVersion": "0.1.3",
+      "commit": "b19bb73c74ed893b8a5d1716d32df32a113ed31b"
+    },
+    {
+      "url": "https://codeload.github.com/lovell/sharp-libvips/tar.gz/refs/tags/v1.3.4",
+      "file": "sharp-libvips-1.3.4.tar.gz",
+      "sha256": "a8e96acb479c9bc1a5b7950f8f25aa6c8e1ef3a19755b45cf2f00d506aeaccc0"
+    },
+    {
+      "url": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
+      "file": "npm-11.21.1.tgz",
+      "sha256": "dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b"
+    },
+    {
+      "url": "https://registry.npmjs.org/ip-address/-/ip-address-10.7.4.tgz",
+      "file": "ip-address-10.7.4.tgz",
+      "sha256": "f9e1d0dd369c002f43770c6ee35942c8078e76d080a1e18e89113eef865f26ff"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 明文 HTTP：dsh（本机回环）、内置浏览器打开 localhost 开发服务器、NAS 内网/Tailscale 地址都需要。
+     NAS 若经公网访问请务必用 HTTPS 反代（见 README 安全说明）。不信任用户安装的 CA。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors><certificates src="system" /></trust-anchors>
+    </base-config>
+</network-security-config>

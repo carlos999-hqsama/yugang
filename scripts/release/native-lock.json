@@ -1,0 +1,43 @@
+{
+  "termuxCommit": "c1f3785a30ac61d7fa5360e807b069c50be03c1f",
+  "packages": [
+    {
+      "name": "proot",
+      "version": "5.1.107.98",
+      "license": "GPL-2.0-or-later",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.98_aarch64.deb",
+      "sha256": "29de40efea4daa2a6168b617915206511c63e8d46bf5f4b07d48723441ef7f3b",
+      "source": "https://github.com/termux/proot/archive/v5.1.107.98.zip",
+      "sourceSha256": "9de61bddd6f5016d065e2755b72ff4747290e5f992562f031785b107b51d02ba",
+      "files": {
+        "libproot.so": "bin/proot",
+        "libproot-loader.so": "libexec/proot/loader"
+      }
+    },
+    {
+      "name": "libtalloc",
+      "version": "2.5.0",
+      "license": "LGPL-3.0-or-later (library); GPL-3.0-or-later (other source files)",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/libt/libtalloc/libtalloc_2.5.0_aarch64.deb",
+      "sha256": "556591f43bb773ad8777e1a29522640866a55f95dab71914418b94a8c58ad5a7",
+      "source": "https://www.samba.org/ftp/talloc/talloc-2.5.0.tar.gz",
+      "sourceSha256": "912afa237510ae542a7733998eb18a12bcda35ab6729c8e2ddb43e8d0ebab007",
+      "files": {
+        "libtalloc.so": "lib/libtalloc.so.2.5.0"
+      }
+    },
+    {
+      "name": "libandroid-shmem",
+      "version": "0.7",
+      "license": "BSD-3-Clause",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/liba/libandroid-shmem/libandroid-shmem_0.7_aarch64.deb",
+      "sha256": "0da3a24d558b93c92bcf8d611e0826a99ff96e396b148e6cdf33b47c47c57ff6",
+      "source": "https://github.com/termux/libandroid-shmem/archive/refs/tags/v0.7.tar.gz",
+      "sourceSha256": "1e5ff8459bc0a8c229dd8a94b27d119987e09ef3414331c2b5ebfff20b98e867",
+      "files": {
+        "libandroid-shmem.so": "lib/libandroid-shmem.so"
+      }
+    }
+  ],
+  "termuxSha256": "804a070fac902b33d1b0af608fc10a555d90b01c17a46754e9db2000a6cd9386"
+}

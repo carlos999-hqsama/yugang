@@ -1,0 +1,16 @@
+allprojects {
+    afterEvaluate { project ->
+        if (project.path == ':app') {
+            tasks.register('releaseDependencyInventory') {
+                doLast {
+                    def rows = configurations.releaseRuntimeClasspath.resolvedConfiguration.resolvedArtifacts.collect { a ->
+                        [coordinate: a.moduleVersion.id.toString(), file: a.file.absolutePath]
+                    }.sort { it.coordinate }
+                    def output = new File(project.buildDir, 'release-dependencies.json')
+                    output.parentFile.mkdirs()
+                    output.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(rows))
+                }
+            }
+        }
+    }
+}

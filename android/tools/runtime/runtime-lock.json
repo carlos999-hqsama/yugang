@@ -1,0 +1,25 @@
+{
+  "node": {
+    "version": "v24.22.1",
+    "filename": "node-v24.22.1-linux-arm64.tar.xz",
+    "sha256": "dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e"
+  },
+  "dsh": "0.2.0-rc.2",
+  "debian": {
+    "manifest": "sha256:a2ca65377c251208de42e1a2722cb949211236c161b634f6f3663754e2d06850",
+    "layer": "sha256:bbeda6b4abb749f743f4547ef5a28070a14de8caef211daa5afb78d5b5fa21ba"
+  },
+  "officeKit": "0.1.3",
+  "npm": {
+    "version": "11.21.1",
+    "filename": "npm-11.21.1.tgz",
+    "url": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
+    "sha256": "dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b"
+  },
+  "npmIpAddress": {
+    "version": "10.7.4",
+    "filename": "ip-address-10.7.4.tgz",
+    "url": "https://registry.npmjs.org/ip-address/-/ip-address-10.7.4.tgz",
+    "sha256": "f9e1d0dd369c002f43770c6ee35942c8078e76d080a1e18e89113eef865f26ff"
+  }
+}

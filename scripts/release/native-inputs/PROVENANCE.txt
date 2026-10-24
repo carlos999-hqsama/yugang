@@ -1,0 +1,7 @@
+Pinned native build inputs
+
+These are original upstream Termux packages and their complete corresponding upstream source archives, plus the pinned Termux build recipes and patches. URLs, versions, licenses and SHA-256 values are recorded in ../native-lock.json. The release fetcher verifies every byte before extraction.
+
+The rolling Termux repository removed the pinned PRoot 5.1.107.98 DEB (HTTP 404 observed during the 2026-10-24 clean build). Keeping these small inputs and corresponding source here avoids silently changing the phone runtime version or relying on developer build caches. No generated .so, APK, runtime archive, credentials or user data are included.
+
+PRoot: GPL-2.0-or-later. talloc library: LGPL-3.0-or-later (other source files retain their own notices). libandroid-shmem: BSD-3-Clause. Full upstream license texts remain inside the corresponding source archives; Termux build and patch notices remain in the pinned recipes archive. See THIRD_PARTY_NOTICES.md at repository root.

@@ -1,0 +1,12 @@
+# dsh's non-insert patch `name` is an assertion, not a rename. Replace the
+# SQLite-backed provider by disabling that root row and inserting the literal
+# scanner at the same composition slot; no derived index is opened or written.
+- id: session-query-sqlite
+  disabled: true
+- insert:
+    - id: session-query-history
+      name: file:///opt/pd/history-query.mjs
+
+- insert:
+    - id: bot-archives
+      name: file:///opt/pd/bot-archives.mjs

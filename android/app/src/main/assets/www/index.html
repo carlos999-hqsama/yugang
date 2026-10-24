@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https://dshfile.pd.local; frame-src *; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<title>鱼缸</title>
+<link rel="stylesheet" href="css/design.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/settings.css">
+<link rel="stylesheet" href="css/unified.css">
+<link rel="stylesheet" href="css/bot-ui.css">
+<link rel="stylesheet" href="css/plugin-guide.css">
+</head>
+<body class="cover">
+<div class="status dev-frame" id="fstatus"></div>
+<div class="main">
+  <div class="rail" id="rail"></div>
+  <section class="scr" id="scr-harness"></section>
+  <section class="scr" id="scr-plugin-guide"></section>
+  <section class="scr" id="scr-settings"></section>
+</div>
+<nav class="tbar2" id="tbar"></nav>
+<div class="gnav dev-frame"><i></i></div>
+<div id="sheet"><div class="mask"></div><div class="pane"></div></div>
+<div id="menu-mask"></div><div id="menu"></div>
+<div id="toast"></div>
+<input type="file" id="filepick" accept="image/*" multiple hidden>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">鱼缸</string>
+    <string name="view_named_image">查看图片 · %1$s</string>
+</resources>

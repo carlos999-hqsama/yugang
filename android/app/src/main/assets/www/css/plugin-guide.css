@@ -1,0 +1,6 @@
+#scr-plugin-guide{align-items:center;justify-content:center;background:#fff;padding:28px}
+.plugin-guide-empty{max-width:320px;display:flex;flex-direction:column;align-items:center;text-align:center;color:#76767c;font-size:13px;line-height:1.7}
+.plugin-guide-icon{width:52px;height:52px;border:1.5px solid #d8d8dd;border-radius:15px;position:relative;margin-bottom:18px}
+.plugin-guide-icon:before,.plugin-guide-icon:after{content:"";position:absolute;left:14px;right:14px;top:24px;height:1.5px;background:#212121;transform:translateY(-50%)}
+.plugin-guide-icon:after{transform:translateY(-50%) rotate(90deg)}
+.plugin-guide-empty .btn{margin-top:16px;min-height:40px;padding:8px 16px}

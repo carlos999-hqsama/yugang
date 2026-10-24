@@ -1,0 +1,4 @@
+# Privacy default: do not upload session logs in addition to normal model requests.
+- id: session-log-deepseek
+  config:
+    enabled: false

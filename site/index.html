@@ -1,0 +1,121 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>鱼缸 · Yugang</title><style>body{max-width:850px;margin:30px auto;padding:0 22px;color:#242424;background:#fff;font:15px/1.8 system-ui}nav{border-bottom:1px solid #ddd;padding-bottom:12px}a{color:inherit}h1{font-size:30px}h2{font-size:23px;margin-top:30px}h3{font-size:19px}p,li{overflow-wrap:anywhere}li{margin:6px 0}pre{overflow:auto;background:#f5f5f5;padding:16px;border-radius:7px;font-size:13px}code{background:#f5f5f5;padding:1px 4px}section+section{border-top:1px solid #ddd;margin-top:45px;padding-top:20px}</style><nav><a href="#zh">中文</a> · <a href="#en">English</a></nav><section id="zh"><h1>鱼缸</h1>
+<p><a href="#en">English</a></p>
+<p>一个基于 DeepSeek Agent Harness 的开源 Android App。可以和 Bot 聊天，也可以让 Bot 帮你做插件，把常用的工具装进手机。</p>
+<h2>为什么叫鱼缸？</h2>
+<p>DeepSeek 的形象是一只鲸鱼。那就把主 Bot 当作缸里的大鲸鱼，其他 Bot 当作各有分工的小鱼。</p>
+<p>每条鱼有自己的工作区，放自己的提示词、记忆、聊天归档和工具配置。它们继承一套共同人格，也可以互相传消息、分工做事。</p>
+<p>插件就像鱼缸里的置景。你需要什么，就往里面布置什么。有人放效率工具，有人放阅读和内容插件，每个人最后养出来的鱼缸都不一样。</p>
+<h2>怎么用？</h2>
+<p>比如，你想做一个自己用的小工具：</p>
+<ol>
+<li>先和主 Bot 聊，把想法和需求捋清楚。</li>
+<li>让主 Bot 把需求交给插件 Bot，插件 Bot 负责实现。</li>
+<li>插件 Bot 通过独立预览通道检查页面和功能，不用切走你正在看的页面。</li>
+<li>做完后把结果告诉主 Bot，再检查一遍；装好的插件就能在菜单里使用。</li>
+</ol>
+<p>第一次使用时，左侧“插件”入口会带你找到插件 Bot；可以点“AI 新闻”示例，修改需求后发送。Agent 实际做完并安装后，新插件会替换这个空入口。</p>
+<p>不写插件也可以。给不同 Bot 分配不同职责，让它们各自管理资料，照常聊天和处理任务就行。模型账号需要自己配置：先填写 Key，验证并获取可用模型后再选择模型。业务插件不预装。</p>
+<h2>目前有什么</h2>
+<ul>
+<li>多 Bot 对话、独立工作区；上下文在运行时按需组装：共同人格单一来源继承，身份、职责、记忆和工具按当前配置加入，不靠一份复制出来的固定长提示词。</li>
+<li>Bot 之间传递、读取消息，内部管理历史和归档。</li>
+<li>文件、命令、网页工具，以及反馈和执行交替展示的任务过程。</li>
+<li>独立插件的安装、启停、删除，切换页面保留状态。</li>
+<li>插件共用的页面组件、黑白主题、网络、流式请求、模型与翻译能力。</li>
+<li>草稿离屏预览、截图、后台计划、通知、媒体和原生 TTS。</li>
+</ul>
+<h2>架构</h2>
+<p>分成两部分：</p>
+<ul>
+<li><strong>Agent Harness</strong>：基于 DeepSeek Agent Harness 二次开发，处理对话、上下文、工具调用和 Bot 协作。</li>
+<li><strong>插件底座</strong>：Android 宿主提供公共框架和通用能力，插件只负责自己的功能、页面和设置。</li>
+</ul>
+<pre><code>鱼缸 App
+├─ 对话与 Bot
+│  ├─ 共同人格 + 各自职责
+│  └─ 独立工作区、记忆与归档
+├─ 本地 Agent Harness
+└─ Android 插件宿主
+   ├─ 公共页面框架与通用能力
+   └─ 用户自己安装的插件</code></pre>
+<p>模型推理使用你配置的服务；“本地 Harness”不表示模型在手机上离线推理。详细分层、上下文流程、数据归属和取消边界见 <a href="../ARCHITECTURE.md">架构说明</a>。</p>
+<p>共同人格的手动设置和记忆学习结果分开保存，下一次回复动态组装；插件可以定义自己的场景风格。Core 提供候选校验、存储和组装，记忆来源与夜间反思由独立适配器负责。</p>
+<h2>开源范围</h2>
+<p>公开的是<strong>对话和完整通用底座</strong>。插件用得到的文件、联网、模型、媒体、预览、后台等能力保留真实实现。</p>
+<p>业务插件、私人伴侣服务、远端业务连接和 Token、私人配置和历史数据不包含在公开工程里。账号、聊天、记忆、附件、已安装插件和签名密钥也不包含在源码或 APK 中。分享 APK，不会把你养的鱼和布置的插件一起分享出去。演示中出现的业务插件（如 Tibo、Codex、B 站相关插件）都不是预置 Core，公开工程不携带它们。</p>
+<p>具体剥离范围见 <a href="../CORE_SPLIT.md">CORE_SPLIT.md</a>。</p>
+<h2>运行与构建</h2>
+<p>Android 10+，ARM64。后台执行会受系统电池策略影响。</p>
+<p>构建需要 JDK 17、Android SDK、Python 和 Node.js，并按锁文件准备运行时。官方固定输入的下载地址可能失效，公开源已附带 3 份上游原始 DEB、匹配完整源码和 Termux 构建配方（约 11.7 MB），构建时按锁文件和 SHA-256 摘要校验，不用本机编译产物代替。完整步骤见 <a href="../BUILD.md">BUILD.md</a>，插件写法见 <a href="../android/app/src/main/assets/plugin-developer/host-contract.md">宿主接口说明</a>。</p>
+<h2>当前状态</h2>
+<p>这是可以审阅的源码候选，尚未正式发布。</p>
+<ul>
+<li>构建成功不代表真机可用。离线测试与 Debug/Release 构建命令见 <a href="../BUILD.md">BUILD.md</a>；ARM64 手机上的首启、运行时初始化、后台驻留、通知和插件安装需要单独验收。</li>
+<li>此前在 ARM64 Android 手机上完成过一次首启、运行时初始化与重启验收。本轮有效账号的模型连通测试按用户要求跳过，新插件引导和图片修复的真机检查仍待补；私人全量版的验收不能代替公开 Core 的验收。</li>
+<li>已在独立 Linux 环境完成最终源码的干净重建、167 项单元检查、Release lint 和 R8；初始缓存为空，最终仅复用本轮 Linux 下载的依赖，不复制 Mac 构建结果。后续改动需对应版本复测。官方固定 PRoot DEB 下载地址已 404，公开源保留原锁定版本的原始输入并做摘要校验；第三方组件与对应源码见 <a href="../THIRD_PARTY_NOTICES.md">第三方声明</a>。</li>
+</ul>
+<h2>安全</h2>
+<p>PRoot、Bot 工作区和能力声明不是恶意代码沙箱。插件和 Agent 工具共享 App 身份，只安装你审阅并信任的代码。宿主加密保存凭据，接口不返回 Key，但这不代表同身份恶意代码就安全。详见 <a href="../SECURITY.md">SECURITY.md</a>。</p>
+<h2>许可与参与</h2>
+<p>宿主源码使用 <strong>GPL-3.0-only</strong>。第三方组件保留各自许可证，分发二进制时附上匹配的许可正文和所需对应源码。见 <a href="../THIRD_PARTY_NOTICES.md">第三方声明</a>。</p>
+<p>欢迎提交问题和改进，参与前看一下 <a href="../CONTRIBUTING.md">CONTRIBUTING.md</a>，不要把私人数据和密钥贴进 issue。</p></section><section id="en" lang="en"><h1>YuGang (鱼缸)</h1>
+<p><a href="#zh">中文</a></p>
+<p>An open-source Android App built on DeepSeek Agent Harness. Chat with Bots, or let them help build plugins that turn your ideas into tools on your phone.</p>
+<h2>Why “YuGang”?</h2>
+<p>“YuGang” means fish tank. DeepSeek is represented by a whale, so think of your main Bot as the big whale and the other Bots as smaller fish with their own jobs.</p>
+<p>Each Bot has a workspace for its role prompt, memory, chat archives and tool settings. They share a common persona and can exchange messages to work together.</p>
+<p>Plugins are the things you add to the tank. Add a productivity tool, a reading tool or something else you need. Everyone ends up with a different environment.</p>
+<h2>How would I use it?</h2>
+<p>Say you want a small tool for yourself:</p>
+<ol>
+<li>Talk through the idea with the main Bot.</li>
+<li>Ask it to pass the requirements to the plugin Bot for implementation.</li>
+<li>The plugin Bot checks the page and behavior through an offscreen preview channel, without switching your foreground page.</li>
+<li>It reports back to the main Bot for another check. Once installed, the plugin is available from the menu.</li>
+</ol>
+<p>On first use, the Plugins entry takes you to the plugin Bot. Choose the AI News example, edit the request and send it. Once the Agent actually builds and installs a plugin, that plugin replaces the empty entry.</p>
+<p>You do not have to build plugins. Give Bots different roles and let them manage their own material while you chat and work. Bring your own model account: enter a key, validate it and retrieve available models before choosing one. Business plugins are not preinstalled.</p>
+<h2>What is included</h2>
+<ul>
+<li>Multi-Bot chat and separate workspaces. Context is assembled at runtime: a single-source shared persona is inherited, and identity, roles, memory and tools are added per current configuration instead of one copied fixed prompt.</li>
+<li>Messages between Bots, with history and archives managed internally.</li>
+<li>File, shell and web tools, with progress updates interleaved with execution.</li>
+<li>Independent plugin installation, enable/disable and removal, with page state retained across menu switches.</li>
+<li>Shared page components, monochrome styling, network/streaming requests, models and translation.</li>
+<li>Draft offscreen preview, screenshots, background jobs, notifications, media and native TTS.</li>
+</ul>
+<h2>Architecture</h2>
+<p>There are two parts:</p>
+<ul>
+<li><strong>Agent Harness</strong>: adapted from DeepSeek Agent Harness for conversations, context, tool calls and Bot collaboration.</li>
+<li><strong>Plugin foundation</strong>: the Android host supplies the shared framework and general capabilities. Plugins provide their own features, pages and settings.</li>
+</ul>
+<pre><code>YuGang App
+├─ Conversation and Bots
+│  ├─ Shared persona + individual roles
+│  └─ Separate workspaces, memory and archives
+├─ Local Agent Harness
+└─ Android plugin host
+   ├─ Shared page framework and general capabilities
+   └─ Independently installed plugins</code></pre>
+<p>Model inference uses your configured service. “Local Harness” does not mean offline model inference on the phone. See <a href="../ARCHITECTURE.md">ARCHITECTURE.md</a> for layers, context assembly, data ownership and cancellation.</p>
+<p>Manual persona settings and structured learned tendencies are stored separately and composed for subsequent replies. Plugins own their scene-specific style. Core validates, stores and composes candidates; memory sources and nightly reflection belong to separate adapters.</p>
+<h2>What is open source?</h2>
+<p>The public source includes <strong>conversation and the complete general foundation</strong>. Real implementations for files, networking, model access, media, preview and background work remain available.</p>
+<p>Business plugins, private companion services, remote business connections and tokens, private configuration and history are excluded. Accounts, chats, memory, attachments, installed plugins and signing keys are not included in source or APK exports. Sharing the APK does not share your personal environment. Business plugins seen in demos (such as Tibo, Codex or Bilibili-related plugins) are not preinstalled Core and are not shipped here.</p>
+<p>See <a href="../CORE_SPLIT.md">CORE_SPLIT.md</a> for the boundary.</p>
+<h2>Run and build</h2>
+<p>Android 10+, ARM64. OS battery policy can affect background work.</p>
+<p>Build with JDK 17, the Android SDK, Python and Node.js, preparing the runtime from pinned inputs. Upstream download URLs can disappear, so the public source ships the three original DEBs, matching complete source and the Termux build recipe (about 11.7 MB); builds verify them against lockfiles and SHA-256 digests instead of substituting locally compiled output. See <a href="../BUILD.md">BUILD.md</a> and the <a href="../android/app/src/main/assets/plugin-developer/host-contract.md">host API contract</a>.</p>
+<h2>Current status</h2>
+<p>This is a source candidate for review, not an officially published release.</p>
+<ul>
+<li>A successful build is not proof of a working device. Offline tests and Debug/Release build commands are in <a href="../BUILD.md">BUILD.md</a>; first boot, runtime initialization, background behavior, notifications and plugin installation on an ARM64 phone need separate acceptance.</li>
+<li>A previous round verified first boot, runtime initialization and restart on an ARM64 Android phone. This round skips valid-account model discovery at the user&#x27;s request; physical-device checks for the new plugin guide and the image fix are still pending. Acceptance of the private full App does not replace public Core acceptance.</li>
+<li>The final source passed a clean Release rebuild, 167 unit checks, Release lint and R8 in an independent Linux environment. Caches were initially empty; only dependencies downloaded by that Linux environment were reused, without Mac build outputs. Future changes need version-specific checks. The pinned upstream PRoot DEB URL now returns 404; the public source keeps the originally pinned inputs with digest verification. See <a href="../THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a> for components and corresponding source.</li>
+</ul>
+<h2>Security</h2>
+<p>PRoot, Bot directories and capability declarations are not a hostile-code sandbox. Plugins and Agent tools share the App identity. Install only code you have reviewed and trust. The host encrypts stored credentials and does not return keys through plugin APIs, but this does not make malicious same-identity code safe. See <a href="../SECURITY.md">SECURITY.md</a>.</p>
+<h2>License and contributions</h2>
+<p>Host source is <strong>GPL-3.0-only</strong>. Third-party components retain their own licenses. Binary distributions need matching license texts and required corresponding source. See <a href="../THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a>.</p>
+<p>Issues and improvements are welcome. Read <a href="../CONTRIBUTING.md">CONTRIBUTING.md</a> first, and keep private data and secrets out of issues.</p></section><p id="quality-links"><a href="../QUALITY.md">代码规范与未完成项 / Code quality</a> · <a href="../DEPENDENCY_REVIEW.json">依赖复核 / Dependency review</a></p></html>

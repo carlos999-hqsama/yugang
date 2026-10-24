@@ -1,0 +1,77 @@
+:root {
+  --ui-bg: #f6f6f7;
+  --ui-surface: #fff;
+  --ui-soft: #f4f4f5;
+  --ui-soft-strong: #ececee;
+  --ui-line: #e6e6e8;
+  --ui-line-strong: #d8d8dc;
+  --ui-text: #1d1d1f;
+  --ui-text-soft: #55555b;
+  --ui-muted: #696970;
+  --ui-primary: #111113;
+  --ui-danger: #c0392b;
+  --ui-radius: 14px;
+  --ui-control-radius: 10px;
+  --ui-focus: #111113;
+  --sat: 0px;
+  --sab: 0px;
+  --sal: 0px;
+  --sar: 0px;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+}
+
+/* The Android plugin container already applies top/bottom system insets. */
+body.pd-plugin-page {
+  --sat: 0px !important;
+  --sab: 0px !important;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  padding-left: var(--sal);
+  padding-right: var(--sar);
+  padding-top: 0;
+  padding-bottom: 0;
+  user-select: none;
+  -webkit-user-smoothing: antialiased;
+}
+
+body input,
+body textarea,
+[role='button'] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role='button']:focus-visible {
+  outline:none;
+}
+
+/* Controls inherit typography instead of browser-native widget defaults. */
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+/* Native form controls follow the shared monochrome theme. */
+input,textarea,select{accent-color:var(--ui-primary)}
+
+/* Conversation inputs use their existing rounded container focus treatment. */
+textarea:focus-visible{outline:none}
+
+/* Keyboard focus uses a neutral fill instead of a rectangular outline. */
+:where(a,button,summary,[role="button"]):focus-visible{background-color:var(--ui-soft,#f0f0f0)}
