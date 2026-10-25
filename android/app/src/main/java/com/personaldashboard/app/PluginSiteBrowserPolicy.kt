@@ -1,8 +1,9 @@
 package com.personaldashboard.app
 
+import java.io.IOException
+import java.math.BigInteger
 import java.net.URI
 import java.net.URLDecoder
-import java.math.BigInteger
 import java.util.Locale
 import org.json.JSONObject
 
@@ -15,8 +16,12 @@ import org.json.JSONObject
 object PluginSiteBrowserPolicy {
     const val MAX_URL_CHARS = 4096
     const val MAX_FILENAME_CHARS = 120
+    const val MAX_DOWNLOAD_BYTES = 256L * 1024 * 1024
     const val PREVIEW_REFUSAL = "预览不允许打开站内浏览器"
     private const val PROFILE_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+    private const val DOWNLOAD_LIMIT_MESSAGE = "下载超过 256 MiB 上限"
+
+    class DownloadSizeLimitException : IOException(DOWNLOAD_LIMIT_MESSAGE)
 
     /** Only these schemes may ever become a WebView navigation or download target. */
     fun url(raw: String?): String {
@@ -150,6 +155,29 @@ object PluginSiteBrowserPolicy {
             "application/vnd.android.package-archive" -> "apk"
             else -> ""
         }
+
+    /** Parse the response's advertised size and reject an over-limit transfer before MediaStore use. */
+    fun contentLength(header: String?): Long? {
+        if (header.isNullOrBlank()) return null
+        val advertised =
+            header.trim().toLongOrNull() ?: throw IllegalArgumentException("下载大小无效")
+        downloadSize(advertised, 0)
+        return advertised
+    }
+
+    /** Bound both the advertised and actual transfer size; this policy is used by the copy loop. */
+    fun downloadSize(
+        advertisedBytes: Long?,
+        actualBytes: Long,
+    ): Long {
+        require(actualBytes >= 0) { "下载大小无效" }
+        advertisedBytes?.let {
+            require(it >= 0) { "下载大小无效" }
+            if (it > MAX_DOWNLOAD_BYTES) throw DownloadSizeLimitException()
+        }
+        if (actualBytes > MAX_DOWNLOAD_BYTES) throw DownloadSizeLimitException()
+        return actualBytes
+    }
 
     private fun headerFilename(disposition: String): String? {
         val match = Regex("(?i)(?:^|;)\\s*filename\\s*=\\s*(\"([^\"]*)\"|[^;]*)").find(disposition)

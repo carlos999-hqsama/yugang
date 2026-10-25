@@ -157,3 +157,12 @@ test('fetchStreamStart refusal reaches only that stream error callback', async t
   assert.equal(errors[0].expected, true);
   assert.equal(context.calls.length, 1, 'a denied stream must not start polling or cancel another stream');
 });
+
+test('public framework retains media and excludes private service shortcuts', async t => {
+  const app = await loadNative(t);
+  for (const name of ['codexFile','documents','miniTools','quota']) assert.equal(name in app.native, false);
+  const pending = app.native.media({op:'read', path:'example.png'});
+  assert.equal(app.calls[0].method, 'pluginMedia');
+  app.reply(app.calls[0], {value:{mime:'image/png'}});
+  assert.deepEqual(await pending, {mime:'image/png'});
+});

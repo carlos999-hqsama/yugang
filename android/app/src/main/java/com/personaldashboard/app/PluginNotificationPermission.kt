@@ -38,6 +38,17 @@ object PluginNotificationPermission {
     fun status(context: Context, preview: Boolean = false): JSONObject =
         snapshot(context, preview).statusJson()
 
+    /** Re-evaluate a request origin on the main thread before Android may show its permission UI. */
+    fun requestDecision(
+        context: Context,
+        preview: Boolean = false,
+        pageVisible: Boolean = true,
+    ): Pair<PluginNotificationPermissionPolicy.Snapshot, String?> {
+        val current = snapshot(context, preview)
+        return current to
+            PluginNotificationPermissionPolicy.immediateRequestResult(current, pageVisible)
+    }
+
     /**
      * Request the real Android runtime permission. This method never waits for the result. Exactly
      * one terminal callback is posted to the main thread for each accepted call.
@@ -106,8 +117,7 @@ object PluginNotificationPermission {
         preview: Boolean,
         callback: (JSONObject) -> Unit,
     ) {
-        val current = snapshot(activity, preview)
-        val immediate = PluginNotificationPermissionPolicy.immediateRequestResult(current)
+        val (current, immediate) = requestDecision(activity, preview)
         if (immediate != null) {
             deliverRequest(callback, current, immediate, requested = false)
             return

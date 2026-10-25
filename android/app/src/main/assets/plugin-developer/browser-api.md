@@ -22,7 +22,7 @@ const stop = on('browserDownload', file => {
 - 请求仅接受 `url` 与可选 `title`，仅限 HTTP/HTTPS；账号密码嵌入 URL、file/javascript/data/intent 等地址拒绝。没有站点脚本到宿主的桥，也不注入宿主账号凭据。
 - 每个稳定插件 ID 对应独立 WebView profile，隔离 Cookie、localStorage、IndexedDB 与缓存。更新、回滚和同一安装下重启保留；卸载精确清理该插件的 profile 数据（未加载时删除，已加载时使用绑定 profile 的数据清理 API），不清宿主或其他插件。
 - Android System WebView 必须支持 MULTI_PROFILE 与定向 DELETE_BROWSING_DATA。不支持时明确返回未打开，不用共享 profile 冒充隔离。预览通道拒绝打开真实网站。
-- 原生顶部显示当前 URL、返回、关闭。关闭回执 `{opened,closed,finalUrl}` 只说明浏览事实，不能把最后 URL 或有 Cookie 当作“已登录”。真实登录状态由网站自己的认证结果决定。
+- 原生顶部显示标题、返回、更多和关闭；更多菜单显示当前域名，没有可编辑地址栏。关闭回执 `{opened,closed,finalUrl}` 只说明浏览事实，不能把最后 URL 或有 Cookie 当作“已登录”。真实登录状态由网站自己的认证结果决定。
 - 下载仅在原生侧读取该 profile 的 Cookie；文件保存到系统 `Download/鱼缸`，回执有真实 MediaStore URI。关闭/移除后不把迟到事件交给其他页面。
 
 ## API 型登录
@@ -50,3 +50,5 @@ status 仅含计数、更新时间、hasCookies 等元数据，不是已认证�
 站内网页占 App 原生左侧菜单右边的内容区，不是全屏 Dialog。左菜单原样常驻、始终可点击；切换 App 菜单将关闭当前浏览器并返回 opened/closed/finalUrl，回执不会把导航抢回来。工具栏仅返回、标题、更多和关闭；当前域名、刷新和本次下载记录在内容区内的更多菜单。外站 HTML/CSS 不被宿主改写。加载进度、系统安全区与键盘避让由宿主负责。
 
 `native.isPreview` 是只读布尔值，来自原生桥预览上下文，无需嗅探 origin。预览调用 `await native.browser({url,title})` 返回 `{opened:false,closed:false,reason:"preview",code:"preview_browser_disabled"}`，不打开真实站点；普通策略拒绝可 catch，错误含 code/reason/expected/retryable。预期策略拒绝不计为页面 errors、不销毁 preview session、不关闭其他 SSE/工具流；某个被拒绝的流只结束自身。真实页面或渲染异常仍会报告。
+
+站内下载上限256 MiB：响应头和实际接收字节都会核对；超限会明确失败并删除未完成文件，关闭浏览器仍会取消在途下载。

@@ -327,8 +327,8 @@ class PluginSiteBrowser private constructor(
                 bytes.third.mime,
                 bytes.third.size,
             )
-        } catch (_: Exception) {
-            downloadFailure()
+        } catch (error: Exception) {
+            downloadFailure(error)
         }
 
     private data class DownloadTarget(
@@ -398,6 +398,8 @@ class PluginSiteBrowser private constructor(
             val mime = responseMime.ifBlank { advertisedMime.orEmpty() }
                 .ifBlank { "application/octet-stream" }
             var name = PluginSiteBrowserPolicy.downloadName(contentDisposition, finalUrl)
+            val contentLength =
+                PluginSiteBrowserPolicy.contentLength(connection.getHeaderField("Content-Length"))
             val extension = PluginSiteBrowserPolicy.extension(mime)
             if (extension.isNotEmpty() && !name.substringAfterLast('.', "").equals(extension, true)) {
                 name += ".$extension"
@@ -419,14 +421,21 @@ class PluginSiteBrowser private constructor(
                 connection.inputStream.use { input ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
-                        if (Thread.currentThread().isInterrupted) throw IOException("下载已取消")
+                        if (Thread.currentThread().isInterrupted || closed.get()) throw IOException("下载已取消")
                         val read = input.read(buffer)
                         if (read < 0) break
+                        if (Thread.currentThread().isInterrupted || closed.get()) throw IOException("下载已取消")
+                        val nextSize =
+                            PluginSiteBrowserPolicy.downloadSize(
+                                contentLength,
+                                size + read.toLong(),
+                            )
                         output.write(buffer, 0, read)
-                        size += read
+                        size = nextSize
                     }
-                    output.flush()
                 }
+                output.flush()
+                PluginSiteBrowserPolicy.downloadSize(contentLength, size)
             } ?: throw IOException("无法写入下载文件")
 
             val finished =
@@ -455,10 +464,14 @@ class PluginSiteBrowser private constructor(
         return clean
     }
 
-    private fun downloadFailure(): JSONObject =
+    private fun downloadFailure(error: Exception): JSONObject =
         JSONObject()
             .put("downloaded", false)
-            .put("reason", "下载失败，请重试")
+            .put(
+                "reason",
+                (error as? PluginSiteBrowserPolicy.DownloadSizeLimitException)?.message
+                    ?: "下载失败，请重试",
+            )
 
     companion object {
         private const val DOWNLOAD_TIMEOUT_MS = 30_000L

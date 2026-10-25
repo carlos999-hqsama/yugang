@@ -189,4 +189,34 @@ class PluginNotificationPermissionPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `request decision requires the current page independently of activity foreground`() {
+        val current = snapshot()
+
+        assertEquals(
+            "page_hidden",
+            PluginNotificationPermissionPolicy.immediateRequestResult(current, pageVisible = false),
+        )
+        assertEquals(
+            null,
+            PluginNotificationPermissionPolicy.immediateRequestResult(current, pageVisible = true),
+        )
+        assertEquals(
+            "not_foreground",
+            PluginNotificationPermissionPolicy.immediateRequestResult(
+                snapshot(foreground = false),
+                pageVisible = true,
+            ),
+        )
+
+        val hidden =
+            PluginNotificationPermissionPolicy.requestResult(
+                current,
+                "page_hidden",
+                requested = false,
+            )
+        assertEquals("page_hidden", hidden.getString("result"))
+        assertFalse(hidden.getBoolean("requested"))
+    }
 }

@@ -111,7 +111,7 @@ Only the conversation system and general foundation belong to the public source.
 
 ## 插件浏览与会话（2026-10-25）
 
-PluginSiteBrowser 使用 AndroidX WebKit MULTI_PROFILE，并由 PluginSiteBrowserHost 提供原生返回/关闭/URL 栏。打开由 PluginPage 的真实触控准入，Bridge 持续到关闭才回执；下载事件回到原所属页面。profile 按稳定插件 ID 保留，卸载在既有清理事务中关闭视图，再定向清理对应 profile 数据：未加载时删除 profile，已加载时调用绑定 profile 的 WebStorageCompat 数据清理。无 MULTI_PROFILE 或定向 DELETE_BROWSING_DATA 时不回退共享 Cookie。
+PluginSiteBrowser 使用 AndroidX WebKit MULTI_PROFILE，并由 PluginSiteBrowserHost 提供原生返回/关闭/标题和更多菜单域名。打开由 PluginPage 的真实触控准入，Bridge 持续到关闭才回执；下载事件回到原所属页面。profile 按稳定插件 ID 保留，卸载在既有清理事务中关闭视图，再定向清理对应 profile 数据：未加载时删除 profile，已加载时调用绑定 profile 的 WebStorageCompat 数据清理。无 MULTI_PROFILE 或定向 DELETE_BROWSING_DATA 时不回退共享 Cookie。
 
 PluginApiSessions 为当前插件的普通/流式 fetch 提供显式 opt-in CookieJar，按宿主身份派生、Keystore AES/GCM 加密。匿名调用不能 include。页面请求登记为当前 revision 的 Run，卸载先取消请求并撤销旧 jar，再删私有会话。通用代码在公开 Core；Codex 私有连接器保持独立。
 

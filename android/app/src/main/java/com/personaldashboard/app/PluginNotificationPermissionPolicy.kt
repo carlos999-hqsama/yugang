@@ -12,6 +12,7 @@ object PluginNotificationPermissionPolicy {
             "not_required",
             "preview_forbidden",
             "not_foreground",
+            "page_hidden",
             "not_requestable",
             "request_in_progress",
             "request_failed",
@@ -89,9 +90,13 @@ object PluginNotificationPermissionPolicy {
     }
 
     /** Null means the foreground caller may dispatch the real Android permission request. */
-    fun immediateRequestResult(snapshot: Snapshot): String? =
+    fun immediateRequestResult(
+        snapshot: Snapshot,
+        pageVisible: Boolean = true,
+    ): String? =
         when {
             snapshot.preview -> "preview_forbidden"
+            !pageVisible -> "page_hidden"
             !snapshot.foreground -> "not_foreground"
             snapshot.requestInProgress -> "request_in_progress"
             snapshot.permissionGranted ->

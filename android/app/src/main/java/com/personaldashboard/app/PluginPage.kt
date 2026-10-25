@@ -307,6 +307,7 @@ class PluginPage(
             ::ready,
             ::navigate,
             pluginIdentity = id to revision,
+            pluginPageVisible = { alive() && view.isShown },
             browserGesture = { alive() && visible && consumeRecentGesture() },
             browserDownloadEvent = { emit("browserDownload", it) },
         )

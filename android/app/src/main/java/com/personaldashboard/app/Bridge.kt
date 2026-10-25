@@ -58,6 +58,7 @@ class Bridge(
     private val onReady: () -> Unit = act::onPageReady,
     private val navigate: ((String) -> Unit)? = null,
     private val pluginIdentity: Pair<String, String>? = null,
+    private val pluginPageVisible: () -> Boolean = { true },
     private val trustedAgentVoiceSource: Boolean = false,
     private val browserGesture: () -> Boolean = { false },
     private val browserDownloadEvent: (JSONObject) -> Unit = {},
@@ -108,9 +109,33 @@ class Bridge(
                                 PluginPlatform.withActiveRevision(act, identity.first, identity.second) {
                                     PluginPlatform.store(act).requireCapability(identity.first, "plugin.notification")
                                 }
+                                val (current, immediate) =
+                                    PluginNotificationPermission.requestDecision(
+                                        act,
+                                        pageVisible = pluginPageVisible(),
+                                    )
+                                if (immediate == "page_hidden") {
+                                    finish(JSONObject().put("error", "插件页面当前不可见，不能申请通知权限"))
+                                    return@runOnUiThread
+                                }
+                                if (immediate != null) {
+                                    finish(
+                                        JSONObject().put(
+                                            "value",
+                                            PluginNotificationPermissionPolicy.requestResult(
+                                                current,
+                                                immediate,
+                                                requested = false,
+                                            ),
+                                        )
+                                    )
+                                    return@runOnUiThread
+                                }
+                                check(pluginPageVisible()) { "插件页面当前不可见，不能申请通知权限" }
                                 PluginBackground.requestNotificationPermission(act, identity.first, a) { result ->
                                     try {
                                         gate();serviceCancellation.check()
+                                        check(pluginPageVisible()) { "插件页面已隐藏，通知权限结果不再应用于此插件" }
                                         PluginPlatform.store(act).requireRevision(identity.first, identity.second)
                                         finish(JSONObject().put("value", result))
                                     } catch (_: Exception) { finish(JSONObject().put("error", "页面已失效，通知权限结果不再应用于此插件")) }

@@ -103,4 +103,4 @@ apksigner verify --verbose --print-certs yugang-core-release.apk
 
 Android JVM 定向运行 FileTextContentTest、PluginMimeTest、PluginFetchResponseTest（最后一组需要本机环回端口）。设备验收需合成 HTML/MD/CSV/JSON 与超 2 MiB 文件，核对 App 内查看器、超限下载提示及本 App 下载 URI 的系统查看器打开。JVM 通过不替代手机验收。文本预览只在内存，下载保留在系统 Download/鱼缸；回滚代码不删除已有下载。
 
-浏览器/会话验收：先检查 WebView MULTI_PROFILE。仅在专用空白 ARM64 模拟器运行 browserSeed/apiSessionSeed，强制停止 App 后运行 browserVerify/apiSessionVerify；使用无凭据的本机合成服务，检查独立 profile、Keystore 重载、更新保留、卸载与晚到响应、下载、无宿主桥。notificationFoundation 使用真实 Android 权限允许/拒绝与预览 status/request 边界。临时服务和模拟器在验收后清理；真实用户登录不以合成结果冒充。
+浏览器/会话设备验收尚需在专用空白 ARM64 模拟器或授权设备逐项检查：WebView MULTI_PROFILE、独立 profile、Keystore 重载、更新保留、卸载与晚到响应、下载、无宿主桥；通知还需核对真实系统允许/拒绝及预览 status/request 边界。公开工程现有 browserBoundary、notificationDenied/Granted 等旧场景不覆盖上述完整新流程；没有 browserSeed/browserVerify/apiSessionSeed/apiSessionVerify/notificationFoundation 场景，不应作为可执行命令。使用无凭据合成服务，临时服务和模拟器在验收后清理；真实用户登录不以合成结果冒充。页面框架检查入口已纳入预览结构化拒绝的 JavaScript 回归。

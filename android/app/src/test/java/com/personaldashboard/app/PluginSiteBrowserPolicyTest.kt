@@ -3,6 +3,7 @@ package com.personaldashboard.app
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -115,6 +116,34 @@ class PluginSiteBrowserPolicyTest {
                 "https://example.test/download",
             ),
         )
+    }
+
+    @Test
+    fun `download size is bounded by content length and the actual stream`() {
+        val max = PluginSiteBrowserPolicy.MAX_DOWNLOAD_BYTES
+
+        assertEquals(null, PluginSiteBrowserPolicy.contentLength(null))
+        assertEquals(0L, PluginSiteBrowserPolicy.contentLength("0"))
+        assertEquals(max, PluginSiteBrowserPolicy.contentLength(max.toString()))
+        val advertisedOverLimit =
+            assertThrows(PluginSiteBrowserPolicy.DownloadSizeLimitException::class.java) {
+                PluginSiteBrowserPolicy.contentLength((max + 1).toString())
+            }
+        assertEquals("下载超过 256 MiB 上限", advertisedOverLimit.message)
+
+        val chunk = 64 * 1024L
+        val advertised = PluginSiteBrowserPolicy.contentLength(max.toString())
+        var actual = 0L
+        repeat((max / chunk).toInt()) {
+            actual = PluginSiteBrowserPolicy.downloadSize(advertised, actual + chunk)
+        }
+        assertEquals(max, actual)
+        assertThrows(PluginSiteBrowserPolicy.DownloadSizeLimitException::class.java) {
+            PluginSiteBrowserPolicy.downloadSize(null, actual + 1)
+        }
+        assertThrows(PluginSiteBrowserPolicy.DownloadSizeLimitException::class.java) {
+            PluginSiteBrowserPolicy.downloadSize(max - 1, max + 1)
+        }
     }
 
     private fun assertRejected(block: () -> Unit) {

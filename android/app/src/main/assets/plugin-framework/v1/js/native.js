@@ -83,12 +83,9 @@ export const native = {
   rtRestart: () => call('rtRestart'),
   backgroundSettings: which => call('backgroundSettings', {which}),
   bots: (args = {op: 'list'}) => call('bots', args),
-  codexFile: args => call('codexFile', args),
+  media: request => call('pluginMedia', request),
   previewFile: args => call('previewFile', args),
   openFile: args => call('openFile', args),
-  documents: (action, args = {}) => call('documents', {action, ...args}),
-  miniTools: (action, args = {}) => call('miniTools', {action, ...args}),
-  quota: (args = {}) => call('quota', args),
   voice: request => subscribeVoice(request),
   browser: request => {
     const site = request && typeof request.url === 'string';
