@@ -119,13 +119,57 @@ object PluginBackground {
         return JSONObject().put("cancelled", true).put("hadSchedule", record != null)
     }
 
-    fun notify(context: Context, pluginId: String, request: JSONObject): JSONObject {
+    /**
+     * Legacy calls without op still post. Status is synchronous and side-effect free; runtime
+     * permission requests must use [requestNotificationPermission] so Android's result is async.
+     */
+    fun notify(
+        context: Context,
+        pluginId: String,
+        request: JSONObject,
+        preview: Boolean = false,
+    ): JSONObject {
+        val id = requireNotificationCapability(context, pluginId)
+        return when (PluginNotificationPermissionPolicy.operation(request)) {
+            "status" -> PluginNotificationPermission.status(context, preview)
+            "send" -> postNotification(context, id, request)
+            "request" ->
+                throw IllegalStateException("通知权限申请必须使用宿主前台异步授权入口")
+            else -> throw IllegalArgumentException("不支持的通知操作")
+        }
+    }
+
+    /**
+     * MainActivity/page-only entry. PluginPlatform must validate the immutable revision before
+     * calling this and must not hold its lifecycle lock while waiting for or delivering callback.
+     */
+    fun requestNotificationPermission(
+        activity: MainActivity,
+        pluginId: String,
+        request: JSONObject,
+        preview: Boolean = false,
+        callback: (JSONObject) -> Unit,
+    ) {
+        val id = requireNotificationCapability(activity, pluginId)
+        require(PluginNotificationPermissionPolicy.operation(request) == "request") {
+            "通知权限申请操作无效"
+        }
+        PluginNotificationPermission.request(activity, preview) { result ->
+            callback(result.put("pluginId", id))
+        }
+    }
+
+    private fun requireNotificationCapability(context: Context, pluginId: String): String {
         val id = PluginContract.id(pluginId)
         val plugins = PluginPlatform.store(context)
         val capabilities = PluginContract.caps(plugins.activeBundle(id))
         require(PluginBackgroundPolicy.NOTIFICATION_CAPABILITY in capabilities) {
             "插件未声明 ${PluginBackgroundPolicy.NOTIFICATION_CAPABILITY}"
         }
+        return id
+    }
+
+    private fun postNotification(context: Context, id: String, request: JSONObject): JSONObject {
         val title = request.getString("title")
         val body = request.getString("body")
         PluginBackgroundPolicy.notification(title, body)
@@ -326,6 +370,8 @@ object PluginBackground {
             val started = SystemClock.elapsedRealtime()
             val store = PluginBackgroundStore(app)
             var status = "failed"
+            var actionResult: PluginBackgroundPolicy.ActionResult? = null
+            var actionError: String? = null
             try {
                 val plugins = PluginPlatform.store(app)
                 val bundle = plugins.activeBundle(record.pluginId)
@@ -340,14 +386,18 @@ object PluginBackground {
                 ) {
                     "stale"
                 }
-                PluginPlatform.invoke(
-                    app,
-                    record.pluginId,
-                    record.action,
-                    record.payload,
-                    cancellation,
-                    expectedRevision = record.revision,
-                )
+                val invoked =
+                    PluginPlatform.invoke(
+                        app,
+                        record.pluginId,
+                        record.action,
+                        record.payload,
+                        cancellation,
+                        expectedRevision = record.revision,
+                    )
+                // Only the action's explicit result is eligible for the bounded status snapshot.
+                // view/state and every other return field remain outside background persistence.
+                actionResult = PluginBackgroundPolicy.explicitActionResult(invoked)
                 status = "ok"
             } catch (e: Exception) {
                 status =
@@ -358,6 +408,7 @@ object PluginBackground {
                         e is IllegalArgumentException -> "rejected"
                         else -> "failed"
                     }
+                actionError = e.message
             } finally {
                 runCatching {
                     PluginBackgroundCoordinator.finish(record.pluginId, cancellation, status) {
@@ -367,7 +418,9 @@ object PluginBackground {
                             System.currentTimeMillis(),
                             finalStatus,
                             SystemClock.elapsedRealtime() - started,
-                            record.generation,
+                            generation = record.generation,
+                            result = actionResult,
+                            errorMessage = actionError,
                         )
                     }
                 }

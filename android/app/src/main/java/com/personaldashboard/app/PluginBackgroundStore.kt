@@ -35,11 +35,11 @@ class PluginBackgroundStore(directory: File) {
 
     fun put(record: ScheduleRecord) =
         synchronized(lock) {
-            validateRecord(record)
+            val normalized = normalizeRecord(record)
+            validateRecord(normalized)
             val root = loadRequired()
-            root
-                .getJSONObject("schedules")
-                .put(record.pluginId, record.toJson().put("pluginId", record.pluginId))
+            root.getJSONObject("schedules")
+                .put(normalized.pluginId, normalized.toJson().put("pluginId", normalized.pluginId))
             save(root)
         }
 
@@ -57,6 +57,8 @@ class PluginBackgroundStore(directory: File) {
         status: String,
         durationMs: Long,
         generation: String? = null,
+        result: PluginBackgroundPolicy.ActionResult? = null,
+        errorMessage: String? = null,
     ) =
         synchronized(lock) {
             val id = PluginContract.id(pluginId)
@@ -69,14 +71,29 @@ class PluginBackgroundStore(directory: File) {
                 error("插件后台计划不存在，不能写入执行状态")
             }
             if (generation != null && row.getString("generation") != generation) return
+            val finalStatus = PluginBackgroundPolicy.status(status)
+            val storedResult = result?.let(PluginBackgroundPolicy::prepareActionResult)
+            val storedError =
+                if (finalStatus == "ok" || finalStatus == "never") null
+                else PluginBackgroundPolicy.prepareErrorMessage(errorMessage)
             val record =
                 schedule(row)
                     .copy(
                         lastRunAtMs = atMs,
-                        lastStatus = PluginBackgroundPolicy.status(status),
+                        lastStatus = finalStatus,
                         lastDurationMs =
                             durationMs.coerceIn(0, PluginBackgroundPolicy.MAX_RUN_MS + 60_000L),
+                        lastResultCaptured = true,
+                        lastActionResultPresent = storedResult != null,
+                        lastActionResult = storedResult?.value,
+                        lastResultFormat = storedResult?.format,
+                        lastResultTruncated = storedResult?.truncated == true,
+                        lastResultRedacted = storedResult?.redacted == true,
+                        lastErrorMessage = storedError?.message,
+                        lastErrorTruncated = storedError?.truncated == true,
+                        lastErrorRedacted = storedError?.redacted == true,
                     )
+            validateRecord(record)
             root.getJSONObject("schedules").put(id, record.toJson().put("pluginId", id))
             save(root)
         }
@@ -143,22 +160,82 @@ class PluginBackgroundStore(directory: File) {
         }
 
     private fun schedule(row: JSONObject): ScheduleRecord {
+        val resultPresent = row.optBoolean("lastActionResultPresent", false)
+        require(!resultPresent || row.has("lastActionResult")) { "插件后台结果记录无效" }
         val record =
-            ScheduleRecord(
-                pluginId = row.getString("pluginId"),
-                jobId = row.getInt("jobId"),
-                revision = row.getString("revision"),
-                action = row.getString("action"),
-                intervalMs = row.getLong("intervalMs"),
-                payload = row.optJSONObject("payload") ?: JSONObject(),
-                createdAtMs = row.optLong("createdAtMs", 0L),
-                generation = row.getString("generation"),
-                lastRunAtMs = row.optLong("lastRunAtMs", 0L),
-                lastStatus = PluginBackgroundPolicy.status(row.optString("lastStatus")),
-                lastDurationMs = row.optLong("lastDurationMs", -1L),
+            normalizeRecord(
+                ScheduleRecord(
+                    pluginId = row.getString("pluginId"),
+                    jobId = row.getInt("jobId"),
+                    revision = row.getString("revision"),
+                    action = row.getString("action"),
+                    intervalMs = row.getLong("intervalMs"),
+                    payload = row.optJSONObject("payload") ?: JSONObject(),
+                    createdAtMs = row.optLong("createdAtMs", 0L),
+                    generation = row.getString("generation"),
+                    lastRunAtMs = row.optLong("lastRunAtMs", 0L),
+                    lastStatus = PluginBackgroundPolicy.status(row.optString("lastStatus")),
+                    lastDurationMs = row.optLong("lastDurationMs", -1L),
+                    lastResultCaptured = row.optBoolean("lastResultCaptured", false),
+                    lastActionResultPresent = resultPresent,
+                    lastActionResult =
+                        if (resultPresent) row.opt("lastActionResult") else null,
+                    lastResultFormat = row.optString("lastResultFormat").ifEmpty { null },
+                    lastResultTruncated = row.optBoolean("lastResultTruncated", false),
+                    lastResultRedacted = row.optBoolean("lastResultRedacted", false),
+                    lastErrorMessage = row.optString("lastErrorMessage").ifEmpty { null },
+                    lastErrorTruncated = row.optBoolean("lastErrorTruncated", false),
+                    lastErrorRedacted = row.optBoolean("lastErrorRedacted", false),
+                ),
             )
         validateRecord(record)
         return record
+    }
+
+    /** Defense in depth for direct puts and old files: only normalized snapshots reach status. */
+    private fun normalizeRecord(record: ScheduleRecord): ScheduleRecord {
+        val currentStatus = PluginBackgroundPolicy.status(record.lastStatus)
+        if (currentStatus == "never" || record.lastRunAtMs <= 0L) {
+            return record.copy(
+                lastStatus = currentStatus,
+                lastResultCaptured = false,
+                lastActionResultPresent = false,
+                lastActionResult = null,
+                lastResultFormat = null,
+                lastResultTruncated = false,
+                lastResultRedacted = false,
+                lastErrorMessage = null,
+                lastErrorTruncated = false,
+                lastErrorRedacted = false,
+            )
+        }
+        val hasResult = record.lastActionResultPresent || record.lastActionResult != null
+        val storedResult =
+            if (hasResult)
+                PluginBackgroundPolicy.prepareActionResult(
+                    PluginBackgroundPolicy.ActionResult(record.lastActionResult),
+                )
+            else null
+        val storedError =
+            if (currentStatus == "ok") null
+            else PluginBackgroundPolicy.prepareErrorMessage(record.lastErrorMessage)
+        val keepPrefixFormat =
+            record.lastResultFormat == "json_prefix" && record.lastActionResult is String
+        return record.copy(
+            lastStatus = currentStatus,
+            lastResultCaptured = record.lastResultCaptured || storedResult != null,
+            lastActionResultPresent = storedResult != null,
+            lastActionResult = storedResult?.value,
+            lastResultFormat =
+                if (keepPrefixFormat) "json_prefix" else storedResult?.format,
+            lastResultTruncated =
+                record.lastResultTruncated || storedResult?.truncated == true,
+            lastResultRedacted = record.lastResultRedacted || storedResult?.redacted == true,
+            lastErrorMessage = storedError?.message,
+            lastErrorTruncated =
+                record.lastErrorTruncated || storedError?.truncated == true,
+            lastErrorRedacted = record.lastErrorRedacted || storedError?.redacted == true,
+        )
     }
 
     private fun validateRecord(record: PluginBackgroundStore.ScheduleRecord) {
@@ -167,10 +244,32 @@ class PluginBackgroundStore(directory: File) {
         PluginBackgroundPolicy.interval(record.intervalMs)
         PluginBackgroundPolicy.payload(record.payload)
         require(
-            record.jobId > 0 && record.revision.isNotEmpty() && record.generation.isNotEmpty(),
+            record.jobId > 0 &&
+                record.revision.isNotEmpty() &&
+                record.generation.length in 1..128 &&
+                record.createdAtMs >= 0 &&
+                record.lastRunAtMs >= 0 &&
+                record.lastDurationMs in -1L..PluginBackgroundPolicy.MAX_RUN_MS + 60_000L,
         ) {
             "插件后台计划记录无效"
         }
+        if (record.lastActionResultPresent) {
+            require(
+                PluginBackgroundPolicy.resultJson(record.lastActionResult)
+                    .toByteArray(Charsets.UTF_8)
+                    .size <= PluginBackgroundPolicy.MAX_ACTION_RESULT_BYTES,
+            ) { "插件后台结果超过存储上限" }
+            require(record.lastResultFormat in setOf("json", "json_prefix")) {
+                "插件后台结果格式无效"
+            }
+        }
+        require(
+            record.lastErrorMessage == null ||
+                record.lastErrorMessage.toByteArray(Charsets.UTF_8).size <=
+                    PluginBackgroundPolicy.MAX_ACTION_ERROR_BYTES &&
+                '\n' !in record.lastErrorMessage &&
+                '\r' !in record.lastErrorMessage,
+        ) { "插件后台错误记录无效" }
     }
 
     private fun loadRequired(): JSONObject {
@@ -243,19 +342,42 @@ class PluginBackgroundStore(directory: File) {
         val lastRunAtMs: Long = 0L,
         val lastStatus: String = "never",
         val lastDurationMs: Long = -1L,
+        val lastResultCaptured: Boolean = false,
+        val lastActionResultPresent: Boolean = false,
+        val lastActionResult: Any? = null,
+        val lastResultFormat: String? = null,
+        val lastResultTruncated: Boolean = false,
+        val lastResultRedacted: Boolean = false,
+        val lastErrorMessage: String? = null,
+        val lastErrorTruncated: Boolean = false,
+        val lastErrorRedacted: Boolean = false,
     ) {
-        fun toJson(): JSONObject =
-            JSONObject()
-                .put("jobId", jobId)
-                .put("revision", revision)
-                .put("action", action)
-                .put("intervalMs", intervalMs)
-                .put("payload", payload)
-                .put("createdAtMs", createdAtMs)
-                .put("generation", generation)
-                .put("lastRunAtMs", lastRunAtMs)
-                .put("lastStatus", lastStatus)
-                .put("lastDurationMs", lastDurationMs)
+        fun toJson(): JSONObject {
+            val json =
+                JSONObject()
+                    .put("jobId", jobId)
+                    .put("revision", revision)
+                    .put("action", action)
+                    .put("intervalMs", intervalMs)
+                    .put("payload", payload)
+                    .put("createdAtMs", createdAtMs)
+                    .put("generation", generation)
+                    .put("lastRunAtMs", lastRunAtMs)
+                    .put("lastStatus", lastStatus)
+                    .put("lastDurationMs", lastDurationMs)
+                    .put("lastResultCaptured", lastResultCaptured)
+                    .put("lastActionResultPresent", lastActionResultPresent)
+                    .put("lastResultFormat", lastResultFormat)
+                    .put("lastResultTruncated", lastResultTruncated)
+                    .put("lastResultRedacted", lastResultRedacted)
+                    .put("lastErrorMessage", lastErrorMessage)
+                    .put("lastErrorTruncated", lastErrorTruncated)
+                    .put("lastErrorRedacted", lastErrorRedacted)
+            if (lastActionResultPresent) {
+                json.put("lastActionResult", lastActionResult ?: JSONObject.NULL)
+            }
+            return json
+        }
     }
 
     companion object {
@@ -272,7 +394,14 @@ object PluginBackgroundPolicy {
     const val MIN_INTERVAL_MS = 15 * 60 * 1000L
     const val MAX_INTERVAL_MS = 24 * 60 * 60 * 1000L
     const val MAX_PAYLOAD_BYTES = 16 * 1024
+    const val MAX_ACTION_RESULT_BYTES = 4 * 1024
+    const val MAX_ACTION_ERROR_BYTES = 512
     const val MAX_RUN_MS = 120_000L
+    private const val MAX_ACTION_STRING_BYTES = MAX_ACTION_RESULT_BYTES
+    private const val MAX_ACTION_DEPTH = 6
+    private const val MAX_ACTION_ITEMS = 32
+    private const val MAX_ACTION_NODES = 128
+    private const val TRUNCATED = "[TRUNCATED]"
     val ALLOWED_STATUS =
         setOf("never", "ok", "rejected", "cancelled", "timeout", "preempted", "failed", "stale")
 
@@ -387,11 +516,330 @@ object PluginBackgroundPolicy {
         return true
     }
 
+    /** Raw explicit action result. It is sanitized before entering ScheduleRecord persistence. */
+    data class ActionResult(val value: Any?)
+
+    data class StoredActionResult(
+        val value: Any,
+        val format: String,
+        val truncated: Boolean,
+        val redacted: Boolean,
+    )
+
+    data class StoredErrorMessage(
+        val message: String?,
+        val truncated: Boolean,
+        val redacted: Boolean,
+    )
+
+    private data class TextSnapshot(
+        val value: String,
+        val truncated: Boolean,
+        val redacted: Boolean,
+    )
+
+    private class SanitizeState {
+        var nodes = 0
+        var truncated = false
+        var redacted = false
+    }
+
+    private val sensitiveText =
+        Regex(
+            "(?i)([\\\"']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|cookie|authorization|password|passwd|secret|api[_-]?key)[\\\"']?\\s*[:=]\\s*)(bearer\\s+[^\\s,;&}]+|\\\"[^\\\"]*\\\"|'[^']*'|[^,;&}\\r\\n]+)",
+        )
+    private val bearerText = Regex("(?i)\\bbearer\\s+[^\\s,;&}]+")
+    private val userInfoText = Regex("(?i)(https?://)[^/\\s:@]+:[^/\\s@]+@")
+    private val errorUrlText = Regex("(?i)https?://[^\\s,;]+")
+    private val rawErrorText =
+        Regex(
+            "(?i)([{}]|^\\s*\\[(?=[\\s\\\"0-9tfn-])|\\bstack ?trace\\b|\\b(?:raw |original )?requests?\\b[\\\"']?\\s*[:=]|\\bheaders?\\b[\\\"']?\\s*[:=]|\\blogs?\\b[\\\"']?\\s*[:=]|\\btool logs?\\b|\\bmodel logs?\\b|\\b(?:get|post|put|patch|delete|head|options)\\s+https?://)",
+        )
+
+    fun explicitActionResult(invoked: JSONObject): ActionResult? =
+        if (invoked.has("result")) ActionResult(invoked.opt("result")) else null
+
+    fun prepareActionResult(input: ActionResult): StoredActionResult {
+        val state = SanitizeState()
+        val value = sanitizeValue(input.value, 0, state)
+        val json = resultJson(value)
+        if (json.toByteArray(Charsets.UTF_8).size > MAX_ACTION_RESULT_BYTES) {
+            // A valid string summary is preferable to cutting a JSON object into invalid JSON.
+            return StoredActionResult(jsonPrefix(json), "json_prefix", true, state.redacted)
+        }
+        return StoredActionResult(value, "json", state.truncated, state.redacted)
+    }
+
+    fun prepareErrorMessage(message: String?): StoredErrorMessage {
+        if (message.isNullOrBlank()) return StoredErrorMessage(null, false, false)
+        if (rawErrorText.containsMatchIn(message)) {
+            // Structured request dumps, headers and stack/log payloads never become error storage.
+            return StoredErrorMessage(null, false, true)
+        }
+        val firstLine = message.lineSequence().firstOrNull().orEmpty()
+        val withoutUrls = errorUrlText.replace(firstLine, "[REDACTED_URL]")
+        val text = sanitizeText(withoutUrls, MAX_ACTION_ERROR_BYTES)
+        return StoredErrorMessage(
+            text.value.ifBlank { null },
+            text.truncated || firstLine.length < message.length,
+            text.redacted || withoutUrls != firstLine,
+        )
+    }
+
+    fun resultJson(value: Any?): String =
+        when (value) {
+            null, JSONObject.NULL -> "null"
+            is JSONObject, is JSONArray -> value.toString()
+            is String -> JSONObject.quote(value)
+            is Number -> JSONObject.numberToString(value)
+            is Boolean -> value.toString()
+            else -> JSONObject.quote(value.toString())
+        }
+
+    private fun sanitizeValue(value: Any?, depth: Int, state: SanitizeState): Any {
+        state.nodes++
+        if (state.nodes > MAX_ACTION_NODES || depth > MAX_ACTION_DEPTH) {
+            state.truncated = true
+            return TRUNCATED
+        }
+        return when (value) {
+            null, JSONObject.NULL -> JSONObject.NULL
+            is String -> {
+                val text = sanitizeText(value, MAX_ACTION_STRING_BYTES)
+                state.truncated = state.truncated || text.truncated
+                state.redacted = state.redacted || text.redacted
+                text.value
+            }
+            is Boolean -> value
+            is Number -> {
+                if (runCatching { JSONObject.numberToString(value) }.isSuccess) value
+                else {
+                    state.truncated = true
+                    value.toString()
+                }
+            }
+            is JSONObject -> sanitizeObject(value, depth, state)
+            is JSONArray -> sanitizeArray(value, depth, state)
+            else -> {
+                state.truncated = true
+                TRUNCATED
+            }
+        }
+    }
+
+    private fun sanitizeObject(value: JSONObject, depth: Int, state: SanitizeState): JSONObject {
+        val output = JSONObject()
+        var count = 0
+        val keys = value.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (blockedResultKey(key)) {
+                state.redacted = true
+                continue
+            }
+            if (count >= MAX_ACTION_ITEMS) {
+                state.truncated = true
+                break
+            }
+            if (key.toByteArray(Charsets.UTF_8).size > 128) {
+                state.truncated = true
+                continue
+            }
+            output.put(key, sanitizeValue(value.opt(key), depth + 1, state))
+            count++
+        }
+        return output
+    }
+
+    private fun sanitizeArray(value: JSONArray, depth: Int, state: SanitizeState): JSONArray {
+        val output = JSONArray()
+        for (index in 0 until value.length()) {
+            if (index >= MAX_ACTION_ITEMS) {
+                state.truncated = true
+                break
+            }
+            output.put(sanitizeValue(value.opt(index), depth + 1, state))
+        }
+        return output
+    }
+
+    private fun blockedResultKey(key: String): Boolean {
+        val normalized = key.lowercase(java.util.Locale.ROOT).filter { it.isLetterOrDigit() }
+        if (
+            normalized.contains("token") ||
+                normalized.contains("cookie") ||
+                normalized.contains("authorization") ||
+                normalized.contains("password") ||
+                normalized.contains("passwd") ||
+                normalized.contains("secret") ||
+                normalized.contains("apikey") ||
+                normalized.contains("credential") ||
+                normalized.contains("passphrase") ||
+                normalized.contains("privatekey") ||
+                normalized in setOf("auth", "authentication", "pwd")
+        )
+            return true
+        return normalized in
+            setOf(
+                "request",
+                "requests",
+                "rawrequest",
+                "originalrequest",
+                "requestbody",
+                "requestjson",
+                "headers",
+                "requestheaders",
+                "responseheaders",
+                "httpheaders",
+                "log",
+                "logs",
+                "rawlog",
+                "rawlogs",
+                "toolcalls",
+                "toolhistory",
+                "modelhistory",
+                "chathistory",
+                "messages",
+                "prompt",
+                "prompts",
+            ) ||
+            normalized.endsWith("request") ||
+            normalized.endsWith("requests") ||
+            normalized.endsWith("headers") ||
+            normalized.endsWith("log") ||
+            normalized.endsWith("logs") ||
+            normalized.contains("toolcall")
+    }
+
+    private fun sanitizeText(value: String, maxBytes: Int): TextSnapshot {
+        var sanitized = sensitiveText.replace(value) { it.groupValues[1] + "\"[REDACTED]\"" }
+        sanitized = bearerText.replace(sanitized, "Bearer [REDACTED]")
+        sanitized = userInfoText.replace(sanitized, "$1[REDACTED]@")
+        val redacted = sanitized != value
+        if (sanitized.toByteArray(Charsets.UTF_8).size <= maxBytes) {
+            return TextSnapshot(sanitized, false, redacted)
+        }
+        return TextSnapshot(utf8Prefix(sanitized, maxBytes - 3) + "…", true, redacted)
+    }
+
+    private fun utf8Prefix(value: String, maxBytes: Int): String {
+        var bytes = 0
+        var index = 0
+        while (index < value.length) {
+            val point = value.codePointAt(index)
+            val width = Character.charCount(point)
+            val size = String(Character.toChars(point)).toByteArray(Charsets.UTF_8).size
+            if (bytes + size > maxBytes) break
+            bytes += size
+            index += width
+        }
+        return value.substring(0, index)
+    }
+
+    private fun jsonPrefix(value: String): String {
+        val output = StringBuilder()
+        var index = 0
+        while (index < value.length) {
+            val point = value.codePointAt(index)
+            val width = Character.charCount(point)
+            val candidate = output.toString() + String(Character.toChars(point)) + "…"
+            if (JSONObject.quote(candidate).toByteArray(Charsets.UTF_8).size > MAX_ACTION_RESULT_BYTES)
+                break
+            output.append(String(Character.toChars(point)))
+            index += width
+        }
+        return output.append("…").toString()
+    }
+
+    /** Actual explicit result plus the bounded host receipt; legacy runs remain distinguishable. */
+    fun lastResult(record: PluginBackgroundStore.ScheduleRecord): JSONObject? {
+        if (record.lastStatus == "never" || record.lastRunAtMs <= 0L) return null
+        val receipt =
+            JSONObject()
+                .put("status", status(record.lastStatus))
+                .put("ok", record.lastStatus == "ok")
+                .put("generation", record.generation)
+                .put("finishedAtMs", record.lastRunAtMs)
+                .put("durationMs", record.lastDurationMs)
+        if (record.lastActionResultPresent) {
+            val stored = prepareActionResult(ActionResult(record.lastActionResult))
+            return receipt
+                .put("kind", "action_result")
+                .put("hasActionResult", true)
+                .put("result", stored.value)
+                .put(
+                    "format",
+                    if (record.lastResultFormat == "json_prefix" && stored.value is String)
+                        "json_prefix"
+                    else stored.format,
+                )
+                .put("truncated", record.lastResultTruncated || stored.truncated)
+                .put("redacted", record.lastResultRedacted || stored.redacted)
+        }
+        return receipt
+            .put("kind", "execution_receipt")
+            .put("hasActionResult", false)
+            .put(
+                "resultUnavailableReason",
+                if (record.lastResultCaptured) "not_returned" else "legacy_or_not_recorded",
+            )
+    }
+
+    /** Fixed error code with an optional bounded, redacted message from this execution. */
+    fun lastError(record: PluginBackgroundStore.ScheduleRecord): JSONObject? {
+        val current = status(record.lastStatus)
+        if (current == "never" || current == "ok" || record.lastRunAtMs <= 0L) return null
+        val stored = prepareErrorMessage(record.lastErrorMessage)
+        val fallback =
+            when (current) {
+                "rejected" -> "后台动作被宿主拒绝"
+                "cancelled" -> "后台动作已取消"
+                "timeout" -> "后台动作执行超时"
+                "preempted" -> "系统提前停止了本次后台执行"
+                "stale" -> "后台计划已失效"
+                else -> "后台动作执行失败"
+            }
+        return JSONObject()
+            .put("code", current)
+            .put("message", stored.message ?: fallback)
+            .put("messageSource", if (stored.message != null) "recorded" else "fallback")
+            .put("truncated", record.lastErrorTruncated || stored.truncated)
+            .put("redacted", record.lastErrorRedacted || stored.redacted)
+    }
+
+    /**
+     * JobScheduler exposes no exact next firing timestamp. This is only a local estimate based on
+     * the latest terminal receipt (or creation time), clamped to the status snapshot time when the
+     * estimated window is already due. It is never a promise of exact or immediate execution.
+     */
+    fun nextRunAt(
+        record: PluginBackgroundStore.ScheduleRecord,
+        systemScheduled: Boolean,
+        nowMs: Long,
+    ): Long? {
+        if (!systemScheduled) return null
+        val basis = if (record.lastRunAtMs > 0L) record.lastRunAtMs else record.createdAtMs
+        if (basis < 0L) return null
+        val earliest =
+            if (Long.MAX_VALUE - basis < record.intervalMs) Long.MAX_VALUE
+            else basis + record.intervalMs
+        return maxOf(nowMs.coerceAtLeast(0L), earliest)
+    }
+
     fun statusJson(
         record: PluginBackgroundStore.ScheduleRecord?,
         systemScheduled: Boolean,
+        nowMs: Long = System.currentTimeMillis(),
     ): JSONObject {
-        if (record == null) return JSONObject().put("scheduled", false).put("lastStatus", "never")
+        if (record == null)
+            return JSONObject()
+                .put("scheduled", false)
+                .put("lastStatus", "never")
+                .put("lastResult", JSONObject.NULL)
+                .put("lastError", JSONObject.NULL)
+                .put("nextRunAt", JSONObject.NULL)
+                .put("nextRunAtEstimated", true)
+        val next = nextRunAt(record, systemScheduled, nowMs)
         return JSONObject()
             .put("scheduled", systemScheduled)
             .put("jobId", record.jobId)
@@ -402,6 +850,10 @@ object PluginBackgroundPolicy {
             .put("lastRunAtMs", record.lastRunAtMs)
             .put("lastStatus", record.lastStatus)
             .put("lastDurationMs", record.lastDurationMs)
+            .put("lastResult", lastResult(record) ?: JSONObject.NULL)
+            .put("lastError", lastError(record) ?: JSONObject.NULL)
+            .put("nextRunAt", next ?: JSONObject.NULL)
+            .put("nextRunAtEstimated", true)
             .put("maxRunMs", MAX_RUN_MS)
     }
 }

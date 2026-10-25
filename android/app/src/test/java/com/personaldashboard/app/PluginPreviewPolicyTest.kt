@@ -25,6 +25,38 @@ class PluginPreviewPolicyTest {
         assertNotNull(PluginPreviewPolicy.refuseBridgeCall("setConfig",JSONObject().put("deepseekKey","synthetic")))
         assertNotNull(PluginPreviewPolicy.refuseBridgeCall("pluginMedia",JSONObject().put("op","clear")))
     }
+    @Test fun `expected preview refusals are structured operation results`() {
+        val browser = PluginPreviewPolicy.bridgeFailure(
+            "siteBrowserOpen",
+            JSONObject().put("url", "https://example.invalid/").put("title", "Blocked"),
+        ) ?: error("browser must be refused")
+        assertEquals(PluginPreviewPolicy.PREVIEW_BROWSER_CODE, browser.code)
+        val browserPayload = browser.payload()
+        assertEquals("预览不会打开真实网站", browserPayload.getString("error"))
+        assertEquals("preview", browserPayload.getString("reason"))
+        assertTrue(browserPayload.getBoolean("expected"))
+        assertFalse(browserPayload.getBoolean("retryable"))
+
+        for (method in listOf("pluginNotify", "plugins", "documents", "diary", "wsOpen")) {
+            val failure = PluginPreviewPolicy.bridgeFailure(method, JSONObject())
+                ?: error("$method must be refused")
+            assertEquals("$method uses the generic policy code", PluginPreviewPolicy.PREVIEW_POLICY_CODE, failure.code)
+            assertEquals("preview", failure.reason)
+            assertTrue(failure.expected)
+            assertEquals(failure.message, failure.payload().getString("error"))
+        }
+        assertNull(PluginPreviewPolicy.bridgeFailure("getConfig", JSONObject()))
+        assertNull(PluginPreviewPolicy.bridgeFailure("plugins", JSONObject().put("action", "list")))
+    }
+
+    @Test fun `invalid arguments stay distinguishable from expected policy refusals`() {
+        val failure = PluginPreviewPolicy.BridgeFailure("invalid_arguments", "bad json")
+        val payload = failure.payload()
+        assertEquals("invalid_arguments", payload.getString("code"))
+        assertFalse(payload.getBoolean("expected"))
+        assertFalse(payload.has("reason"))
+    }
+
     @Test fun `viewport falls back to a phone sized window and rejects extremes`() {
         assertEquals(PluginPreviewPolicy.DEFAULT_WIDTH_PX to PluginPreviewPolicy.DEFAULT_HEIGHT_PX,
             PluginPreviewPolicy.viewport(null, null))

@@ -138,6 +138,7 @@ class PluginShell(
             if (!closed) {
                 for ((id, cached) in pages.toMap()) {
                     if (runCatching { store.requireRevision(id, cached.revision) }.isFailure) {
+                        PluginSiteBrowserHost.closePlugin(id)
                         pages.remove(id)
                         if (page === cached.page) page = null
                         cached.page.close(
@@ -193,6 +194,7 @@ class PluginShell(
                 rightMargin = right
             }
         pages.values.forEach { it.page.view.layoutParams = pageParams() }
+        PluginSiteBrowserHost.insets(activity, top, bottom, left, right)
     }
 
     private fun pageParams() =
@@ -202,6 +204,24 @@ class PluginShell(
             topMargin = topInset
             bottomMargin = bottomInset
         }
+
+    /** Site browsers are content surfaces below the unchanged native rail, never modal windows. */
+    fun mountSiteBrowserSurface(surface: View): Boolean {
+        if (closed) return false
+        root.addView(surface, root.indexOfChild(railScroll))
+        railScroll.bringToFront()
+        return true
+    }
+
+    fun siteBrowserBack(): Boolean = PluginSiteBrowserHost.back(activity)
+
+    fun closeSiteBrowserForNavigation() {
+        PluginSiteBrowserHost.closeForNavigation(activity)
+    }
+
+    fun siteBrowserThemeChanged() {
+        PluginSiteBrowserHost.themeChanged(activity)
+    }
 
     private fun button(title: String, click: () -> Unit) =
         Button(activity).apply {
@@ -362,6 +382,7 @@ class PluginShell(
 
     fun open(id: String) {
         if (closed) return
+        closeSiteBrowserForNavigation()
         if (id == "plugins") {
             if (store.list().getJSONArray("plugins").length() == 0) showOnboarding() else manage()
             return
@@ -650,6 +671,7 @@ class PluginShell(
     }
 
     private fun manage() {
+        closeSiteBrowserForNavigation()
         showingOnboarding = false
         val managerScroll = if (current == "plugins") panel.scrollY else 0
         saveScroll()
@@ -705,6 +727,7 @@ class PluginShell(
     }
 
     private fun showOnboarding() {
+        closeSiteBrowserForNavigation()
         showingOnboarding = true
         saveScroll()
         viewKey = ""
@@ -785,6 +808,7 @@ class PluginShell(
     }
 
     fun close() {
+        closeSiteBrowserForNavigation()
         leaveSurface()
         closed = true
         generation++

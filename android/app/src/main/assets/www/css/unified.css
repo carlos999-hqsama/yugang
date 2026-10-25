@@ -614,7 +614,9 @@ input,textarea,select{accent-color:var(--ui-primary)}
 /* Structured user image blocks stay in the bubble and use the same preview behavior. */
 #scr-harness .ubub .user-images{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 #scr-harness .ubub .user-images:empty{display:none}
-#scr-harness .ubub .user-images .chat-image{width:min(180px,100%);flex:0 0 auto}
+#scr-harness .ubub.image-only,body.cover #scr-harness .ubub.image-only{background:transparent;color:var(--ui-text);padding:0}
+#scr-harness .ubub.image-only .user-images{margin-top:0;justify-content:flex-end}
+#scr-harness .ubub .user-images .chat-image{width:auto;max-width:min(180px,100%);flex:0 1 auto}
 #scr-harness .ubub .user-images .chat-image img{max-height:180px}
 #scr-harness .ubub .chat-image-state{display:flex;align-items:center;gap:8px;padding:18px 20px;color:var(--ui-muted);font-size:12px}
 #sheet .chat-image-view{display:block;flex:1;min-height:0;width:100%;object-fit:contain;background:#111}

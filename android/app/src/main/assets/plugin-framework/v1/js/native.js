@@ -6,6 +6,13 @@ const pending = new Map();
 const listeners = new Map();
 let sequence = 0;
 
+function readPreviewContext() {
+  try { return bridge?.isPreview?.() === true; }
+  catch { return false; }
+}
+
+export const isPreview = readPreviewContext();
+
 window.__pd_cb = (id, json) => {
   const request = pending.get(id);
   if (!request) return;
@@ -46,7 +53,16 @@ function requestError(result, code=result.code || 'http_error', message=result.e
   return Object.assign(new Error(message), {code,status:result.status || 0,finalUrl:result.finalUrl || '',timeout:result.timeout === true,cancelled:result.cancelled === true,retryable:result.retryable === true});
 }
 
+function isExpectedPreviewFailure(error) {
+  return error?.reason === 'preview' && typeof error?.code === 'string';
+}
+
+function previewBrowserResult(error) {
+  return {opened:false, closed:false, reason:'preview', code:error.code};
+}
+
 export const native = {
+  isPreview,
   call,
   getConfig: () => call('getConfig'),
   setConfig: patch => call('setConfig', patch),
@@ -67,15 +83,29 @@ export const native = {
   rtRestart: () => call('rtRestart'),
   backgroundSettings: which => call('backgroundSettings', {which}),
   bots: (args = {op: 'list'}) => call('bots', args),
+  codexFile: args => call('codexFile', args),
+  previewFile: args => call('previewFile', args),
+  openFile: args => call('openFile', args),
+  documents: (action, args = {}) => call('documents', {action, ...args}),
+  miniTools: (action, args = {}) => call('miniTools', {action, ...args}),
+  quota: (args = {}) => call('quota', args),
   voice: request => subscribeVoice(request),
-  browser: state => call('browser', state).catch(() => {}),
+  browser: request => {
+    const site = request && typeof request.url === 'string';
+    return call(site ? 'siteBrowserOpen' : 'browser', request).catch(error => {
+      if (isExpectedPreviewFailure(error)) return previewBrowserResult(error);
+      // Keep the legacy fire-and-forget entry point, but never hide real site browser errors.
+      if (!site) return undefined;
+      throw error;
+    });
+  },
   dshWeb: state => call('dshWeb', state).catch(() => {}),
   ready: () => call('ready').catch(() => {}),
   model: (request = {op:'status'}) => call('pluginModel', request),
-  media: (request) => call('pluginMedia', request),
   translate: (text, options = {}) => call('pluginModel', {...options,op:'translate',text}),
   background: (request = {op:'status'}) => call('pluginBackground', request),
   notify: request => call('pluginNotify', request),
+  apiSession: (request = {op:'status'}) => call('pluginApiSession', request),
   tts: (request = {op:'status'}) => {
     const value = {...request};
     if ((value.op || 'status') === 'speak' && !value.id) value.id = uuid();
@@ -99,6 +129,7 @@ export const native = {
       responseType: options.responseType || 'auto',
     };
     // Only send what the caller really set: an explicit null must not become a body.
+    if (options.credentials !== undefined) request.credentials = options.credentials;
     if (options.headers) request.headers = options.headers;
     if (options.body != null) request.body = String(options.body);
     if (options.bodyBase64) request.bodyBase64 = options.bodyBase64;
@@ -137,6 +168,7 @@ export const native = {
       method: String(options.method || 'GET').toUpperCase(),
       timeoutMs: options.timeoutMs || 15000,
     };
+    if (options.credentials !== undefined) request.credentials = options.credentials;
     if (options.headers) request.headers = options.headers;
     if (options.body != null) request.body = String(options.body);
     if (options.bodyBase64) request.bodyBase64 = options.bodyBase64;
@@ -157,6 +189,8 @@ export const native = {
           timeout: event?.timeout === true,
           cancelled: event?.cancelled === true,
           retryable: event?.retryable === true,
+          reason: event?.reason,
+          expected: event?.expected === true,
         },
       ));
     };
@@ -218,7 +252,10 @@ export function sse(target, path, {onEvent, onState}) {
   const id = uuid();
   const off = on(`sse:${id}`, event => {
     if (event.kind === 'event') onEvent?.(event.event, event.data);
-    else onState?.(event.kind, event.error);
+    else {
+      if (event.kind === 'error') off();
+      onState?.(event.kind, event.error, event);
+    }
   });
   bridge.call('sseOpen', id, JSON.stringify({target, path}));
   return {
@@ -240,7 +277,7 @@ export function ws(target, path, {onOpen, onMessage, onClose}) {
     else if (event.kind === 'message') onMessage?.(event.data);
     else if (event.kind === 'close') {
       off();
-      onClose?.(event.code, event.reason);
+      onClose?.(event.code, event.reason, event);
     }
   });
   bridge.call('wsOpen', id, JSON.stringify({target, path}));

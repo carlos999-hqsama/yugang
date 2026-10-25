@@ -104,3 +104,17 @@ Bot 目录是组织边界。PRoot、WebView 和能力声明不是抵御恶意插
 YuGang Core separates the Android host, local DeepSeek Agent Harness, per-Bot workspaces and independently installed plugins. Shared persona, Bot role, local memory and tool settings are assembled from current host configuration; skill instructions are disclosed on demand and tool switches are checked again before execution. Plugins reuse a versioned framework and real host network, model, media, TTS, preview, background and notification implementations. They share the application UID and are trusted code, not sandboxed hostile extensions.
 
 Only the conversation system and general foundation belong to the public source. Business packages, private companion services, credentials, installed plugins and user history are excluded. Build success, source publication readiness, physical-device acceptance and signed binary release are separate claims; see BUILD.md and SECURITY.md for their limits.
+
+## 文本交付文件（2026-10-25）
+
+`FileTextContent` 对 UTF-8 文本实施 2 MiB 流式上限；`FilePreviewDialog` 提供无宿主桥、无远程资源的 App 内查看器。`DownloadedFiles` 仅打开本 App 在 Download/鱼缸保存的 MediaStore 句柄。网络文本类型统一由 PluginMime 判定，包含 RSS/Atom 与 application 的 +xml/+json。连接器负责来源鉴权；Core 不含私人 Codex 适配。
+
+## 插件浏览与会话（2026-10-25）
+
+PluginSiteBrowser 使用 AndroidX WebKit MULTI_PROFILE，并由 PluginSiteBrowserHost 提供原生返回/关闭/URL 栏。打开由 PluginPage 的真实触控准入，Bridge 持续到关闭才回执；下载事件回到原所属页面。profile 按稳定插件 ID 保留，卸载在既有清理事务中关闭视图，再定向清理对应 profile 数据：未加载时删除 profile，已加载时调用绑定 profile 的 WebStorageCompat 数据清理。无 MULTI_PROFILE 或定向 DELETE_BROWSING_DATA 时不回退共享 Cookie。
+
+PluginApiSessions 为当前插件的普通/流式 fetch 提供显式 opt-in CookieJar，按宿主身份派生、Keystore AES/GCM 加密。匿名调用不能 include。页面请求登记为当前 revision 的 Run，卸载先取消请求并撤销旧 jar，再删私有会话。通用代码在公开 Core；Codex 私有连接器保持独立。
+
+通知 request 由 Bridge 异步接管，MainActivity 转发真实系统结果；不在生命周期锁内等待 UI。后台只记录动作显式 result 的有界脱敏快照和错误说明，generation 保持并发与清理边界。
+
+2026-10-25 浏览器原生内容页：挂载在左侧菜单以下的右侧内容 surface，菜单布局/样式/点击保持不变；原生返回、更多、关闭与进度不修改外站。预览上下文由 native.isPreview 提供；预期权限/策略拒绝按调用回执，不记为页面故障，也不关闭其他流。

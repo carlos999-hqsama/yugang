@@ -131,6 +131,7 @@ object PluginPlatform {
 
     private fun cancelPluginRuns(id: String) {
         PluginTts.stopPlugin(id)
+        PluginSiteBrowserHost.closePlugin(id)
         PluginFetchStream.discardPendingCancels(id)
         runs.entries
             .filter { it.value.id == id }
@@ -174,6 +175,8 @@ object PluginPlatform {
         }
         clean { check(PluginTts.invalidateRevision(context, id, null)) }
         clean { PluginBrowserStorage.clear(context, id) }
+        clean { PluginApiSessions.of(context).clearPlugin(id) }
+        clean { PluginSiteBrowserHost.clearPlugin(context, id) }
         if (cleared) clean { s.finishRemoval(id) }
         return s.list().put("removed", true).put("cleanupPending", !cleared).apply {
             if (!cleared) put("warning", "插件已移除，专属数据尚未清理完，将在返回 App 后重试")
@@ -225,6 +228,10 @@ object PluginPlatform {
                 JSONObject().put("saved", true)
             }
             "plugin.media" -> media(context, id, arguments, run.cancellation)
+            "plugin.apiSession" -> withActiveRevision(context, id, run.bundle.getString("_revision")) {
+                run.cancellation.check()
+                PluginApiSessions.of(context).call(id, arguments)
+            }
             "plugin.model" -> PluginModel(context, cfg).call(id, arguments, run.cancellation)
             "plugin.background" ->
                 background(
@@ -292,6 +299,7 @@ object PluginPlatform {
                 runs[key] = Run(id, bundle, token)
             }
             return when (capability) {
+                "plugin.apiSession" -> PluginApiSessions.of(context).call(id, arguments)
                 "plugin.model" -> PluginModel(context, cfg).call(id, arguments, token)
                 "plugin.media" -> media(context, id, arguments, token)
                 "plugin.tts" -> PluginTts(context).call(id, arguments, revision, token, receivedAt)
@@ -304,6 +312,37 @@ object PluginPlatform {
             runs.remove(key)
             token.cancel()
         }
+    }
+
+    /** Credentials are chosen from host identity, never from request-supplied plugin IDs. */
+    private fun sessionJar(context: Context, id: String, revision: String, args: JSONObject): okhttp3.CookieJar? {
+        val credentials = args.optString("credentials", "omit")
+        require(credentials in setOf("omit", "include")) { "credentials 只支持 omit 或 include" }
+        if (credentials == "omit") return null
+        return synchronized(lifecycle) {
+            val bundle = store(context).activeBundle(id)
+            require(bundle.getString("_revision") == revision) { "插件已更新，旧页面已失效" }
+            store(context).requireCapability(id, "plugin.apiSession")
+            require("plugin.apiSession" in PluginContract.caps(bundle)) { "插件未声明 plugin.apiSession" }
+            PluginApiSessions.of(context).credentialsJar(args, id)
+        }
+    }
+
+    fun pageFetch(context: Context, id: String, revision: String, args: JSONObject, parent: PluginCancellation): JSONObject {
+        val key = java.util.UUID.randomUUID().toString()
+        val token = PluginCancellation()
+        val detach = parent.onCancel { token.cancel() }
+        try {
+            val jar = synchronized(lifecycle) {
+                val bundle = store(context).activeBundle(id)
+                require(bundle.getString("_revision") == revision) { "插件已更新，旧页面已失效" }
+                token.check()
+                val value = sessionJar(context, id, revision, args)
+                runs[key] = Run(id, bundle, token)
+                value
+            }
+            return PluginFetch.fetch(args, token, jar).also { token.check() }
+        } finally { detach(); runs.remove(key); token.cancel() }
     }
 
     /** Page streams are revision-bound runs, so update/disable/removal cancels their calls. */
@@ -326,6 +365,7 @@ object PluginPlatform {
             detachParent()
             error("请求编号正在使用")
         }
+        var credentialJar: okhttp3.CookieJar? = null
         val run =
             try {
                 synchronized(lifecycle) {
@@ -333,6 +373,7 @@ object PluginPlatform {
                     val bundle = store(context).activeBundle(id)
                     require(bundle.getString("_revision") == revision) { "插件已更新，旧页面已失效" }
                     token.check()
+                    credentialJar = sessionJar(context, id, revision, args)
                     val value = Run(id, bundle, token)
                     require(runs.putIfAbsent(key, value) == null) { "请求编号正在使用" }
                     value
@@ -355,6 +396,7 @@ object PluginPlatform {
                     token,
                     receivedAtNanos,
                     {},
+                    credentialJar,
                 )
                 .put("requestId", externalRequest.requestId)
         } catch (e: Exception) {
@@ -571,7 +613,7 @@ object PluginPlatform {
                         cancellation.check()
                     }
                     .apply { remove("headers") }
-            "fetch" -> PluginFetch.fetch(args, cancellation)
+            "fetch" -> PluginFetch.fetch(args, cancellation, sessionJar(context, pluginId, revision, args))
             "fetchStreamStart" ->
                 startPageStream(
                     context,
@@ -705,15 +747,6 @@ internal object PluginFetch {
             "te",
             "trailer",
         )
-    private val TEXT_TYPES =
-        listOf(
-            "text/",
-            "application/json",
-            "application/xml",
-            "application/javascript",
-            "application/x-www-form-urlencoded",
-            "application/graphql",
-        )
     internal val calls = ConcurrentHashMap<String, Call>()
 
     private val client by lazy {
@@ -746,9 +779,12 @@ internal object PluginFetch {
         val maxBytes: Long,
         val responseType: String,
         val requestId: String,
+        val credentials: String = "omit",
     )
 
     internal fun parse(args: JSONObject): FetchRequest {
+        val credentials = args.optString("credentials", "omit")
+        require(credentials in setOf("omit", "include")) { "credentials 只支持 omit 或 include" }
         val url = validateUrl(args.getString("url"))
         val method = args.optString("method", "GET").trim().uppercase()
         require(method in METHODS) { "不支持的请求方法" }
@@ -804,12 +840,14 @@ internal object PluginFetch {
             maxBytes,
             responseType,
             requestId,
+            credentials,
         )
     }
 
     fun fetch(
         args: JSONObject,
         cancellation: PluginCancellation = PluginCancellation(),
+        cookieJar: okhttp3.CookieJar? = null,
     ): JSONObject {
         val request = parse(args)
         val url = request.url
@@ -833,6 +871,7 @@ internal object PluginFetch {
         val call =
             client
                 .newBuilder()
+                .cookieJar(if (request.credentials == "include") requireNotNull(cookieJar) { "缺少插件身份，不能使用持久登录会话" } else okhttp3.CookieJar.NO_COOKIES)
                 .callTimeout(timeout, TimeUnit.MILLISECONDS)
                 .build()
                 .newCall(builder.build())
@@ -868,7 +907,7 @@ internal object PluginFetch {
                     when (responseType) {
                         "base64" -> true
                         "text" -> false
-                        else -> TEXT_TYPES.none { contentType.startsWith(it) }
+                        else -> !PluginMime.isText(contentType)
                     }
                 if (truncated && binary)
                     throw PluginRequestException(
@@ -898,7 +937,7 @@ internal object PluginFetch {
                         .put("truncated", truncated)
                         .put("finalUrl", response.request.url.toString())
                         .put("headers", headersOut)
-                if (binary) result.put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
+                if (binary) result.put("base64", java.util.Base64.getEncoder().encodeToString(bytes))
                 else result.put("text", String(bytes, Charsets.UTF_8))
                 cancellation.check()
                 return result
@@ -921,6 +960,7 @@ internal object PluginFetch {
     internal fun newStreamCall(
         request: FetchRequest,
         timeoutMs: Long,
+        cookieJar: okhttp3.CookieJar? = null,
     ): Call {
         val builder = Request.Builder().url(request.url)
         request.headers.forEach { (name, value) -> builder.header(name, value) }
@@ -937,6 +977,7 @@ internal object PluginFetch {
         builder.method(request.method, body)
         return client
             .newBuilder()
+            .cookieJar(if (request.credentials == "include") requireNotNull(cookieJar) { "缺少插件身份，不能使用持久登录会话" } else okhttp3.CookieJar.NO_COOKIES)
             .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
             .build()
             .newCall(builder.build())

@@ -45,18 +45,20 @@ internal object PluginFetchStream {
         cancellation: PluginCancellation,
         receivedAtNanos: Long = System.nanoTime(),
         onFinished: () -> Unit = {},
-    ): JSONObject = start(parse(args), cancellation, receivedAtNanos, onFinished)
+        cookieJar: okhttp3.CookieJar? = null,
+    ): JSONObject = start(parse(args), cancellation, receivedAtNanos, onFinished, cookieJar)
 
     fun start(
         request: PluginFetch.FetchRequest,
         cancellation: PluginCancellation,
         receivedAtNanos: Long,
         onFinished: () -> Unit,
+        cookieJar: okhttp3.CookieJar? = null,
     ): JSONObject {
         val requestId = request.requestId
         consumePendingCancel(requestId)
         cancellation.check()
-        val session = StreamSession(request, cancellation, receivedAtNanos)
+        val session = StreamSession(request, cancellation, receivedAtNanos, cookieJar)
         try {
             synchronized(streams) {
                 require(streams.size < MAX_ACTIVE_STREAMS) { "流式请求过多" }
@@ -161,6 +163,7 @@ internal object PluginFetchStream {
         private val request: PluginFetch.FetchRequest,
         private val parent: PluginCancellation,
         private val receivedAtNanos: Long,
+        cookieJar: okhttp3.CookieJar? = null,
     ) {
         private val id = request.requestId
         private val token = PluginCancellation()
@@ -178,6 +181,7 @@ internal object PluginFetchStream {
                 request,
                 (request.timeoutMs - (System.nanoTime() - receivedAtNanos) / 1_000_000)
                     .coerceAtLeast(1),
+                cookieJar,
             )
         private val detachParent = parent.onCancel {
             streams.remove(id, this)

@@ -92,3 +92,9 @@ manifest 必须声明 `plugin.tts`。宿主优先使用 Android 系统中文 Tex
 免费回退的语速为离散 providerSpeed：`floor(rate * 3)`，限制1–9；返回实际 providerSpeed，不能把它称为精确连续语速。系统线路执行系统rate/pitch。原生动作和页面请求的时延都从对应可信宿主接收边界计时，插件不能提供自己的计时起点。
 
 页面`speak.id`可立即stop：若停止先于请求入场，宿主返回`pendingCancelled:true`并阻止该id随后开始；不存在已开始播放时不伪报`stopped:true`。此取消仅匹配当前插件与revision，短期去重记录有界且不持久化。
+
+## 通知权限与后台结果（2026-10-25）
+
+`native.notify({op:'status'})` 查询真实 App 级 permissionGranted、notificationsEnabled、canNotify、canRequest。`op:'request'` 仅限已安装的前台页面，等待原生系统授权结果后返回；取消/拒绝不会当作成功。原生/后台动作不能申请权限，预览仅允许 status。无 op 的旧 title/body 通知发送保持。
+
+`plugin.background` status 增加 lastResult（动作显式 result 的有界脱敏快照，不含 view/state/工具日志）、lastError（错误码与有界脱敏说明）、nextRunAt 与 nextRunAtEstimated。超限或脱敏有标记；旧记录没有实际动作结果时明确说明。结果写入绑定 generation，旧任务不能覆盖新计划或复活已删除计划。nextRunAt 是 JobScheduler 本地估算，不表示准点执行。

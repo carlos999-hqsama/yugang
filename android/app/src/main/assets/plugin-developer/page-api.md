@@ -46,3 +46,14 @@ export default definePage({
 使用程序序列化JSON文件，不手工转义长脚本。迭代时通过 phone_plugins_preview(packagePath=...,op="open") 验证未安装草稿的实际页面与交互。需要正式交付时再 phone_plugins_install(packagePath=...)，核对当前 revision、页面入口、操作、返回、切页和重启保存；分别报告草稿预览与安装版的实际验证状态。
 
 宿主模型和翻译用 `native.model` / `native.translate`，受限后台任务用 `native.background`，通知用 `native.notify`；声明对应能力并读取 [服务契约](service-api.md)，不猜参数。
+
+## 文本文件预览与下载打开（通用宿主）
+
+- `native.previewFile({mime,name,html})`，或传 `text` / base64 `dataUrl` 中的一项。接受 UTF-8 文本，最多 2 MiB；HTML 在无宿主桥、无远程资源的独立 App 内查看器中打开。Markdown、CSV、JSON 按可读文本展示。返回 `{preview:true}` 表示已排入展示；不打开 Mac，不读取任意文件路径。
+- `native.openFile({uri})` 打开本 App 已保存到系统 `Download/鱼缸` 的下载句柄。只接受本 App 所有的 MediaStore Downloads 内容 URI；不接受路径、网络地址或其他 App 文件。返回 `{opened:true,...}`，无查看器则返回 `{opened:false,reason}`。APK 只保留下载结果，需用户从系统下载管理器手动打开。
+- 下载连接器应返回实际保存后的 `uri`、`displayPath`、`name`、`mime`、`bytes`。`displayPath` 是给用户看的位置，调用打开时使用 `uri`。本 API 不增加共享存储读取权限。
+- 文件来源、账号连接和鉴权由各自连接器负责；公开 Core 不内置私人 Codex 连接配置。
+
+完整文件参数和连接器边界见 [文本交付文件](file-api.md)。
+
+预览识别使用 `native.isPreview`（只读 boolean）。预期宿主策略拒绝只作用于本次调用，不代表页面或助手会话终止。浏览器预览返回结构化的未打开结果，具体见 browser-api.md；插件可以据此自行选择阅读器等回退。

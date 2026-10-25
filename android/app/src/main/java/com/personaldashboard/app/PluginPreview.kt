@@ -72,11 +72,16 @@ class PluginPreview(
             ::ready,
             { blockedNavigation() },
             pluginServiceHandler = { capability, request, cancellation ->
-                require(capability == "plugin.model" && request.optString("op") != "budget") {
-                    "预览不允许修改宿主服务配置"
+                if (capability == "plugin.notification" && request.optString("op") == "status") {
+                    require("plugin.notification" in previewCapabilities) { "插件未声明 plugin.notification" }
+                    PluginNotificationPermission.status(activity, preview = true)
+                } else {
+                    require(capability == "plugin.model" && request.optString("op") != "budget") {
+                        "预览不允许修改宿主服务配置"
+                    }
+                    PluginModel.forPreview(activity, cfg, previewCapabilities)
+                        .call(surface.id, request, cancellation)
                 }
-                PluginModel.forPreview(activity, cfg, previewCapabilities)
-                    .call(surface.id, request, cancellation)
             },
         )
 
@@ -132,7 +137,7 @@ class PluginPreview(
                     req: WebResourceRequest,
                 ): Boolean {
                     if (purgeRequest(req) || surface.packageKey(req.url) != null) return false
-                    recordError("navigation", "预览阻止了外部跳转")
+                    // Expected containment, not a renderer failure. Keep the preview session alive.
                     return true
                 }
 
@@ -167,7 +172,7 @@ class PluginPreview(
                     callback: ValueCallback<Array<Uri>>,
                     params: FileChooserParams,
                 ): Boolean {
-                    recordError("policy", "预览不允许打开系统文件选择器")
+                    // There is no browser promise to reply to; just decline this one chooser.
                     callback.onReceiveValue(null)
                     return true
                 }
@@ -180,6 +185,9 @@ class PluginPreview(
     /** The plugin page never gets to call the host directly: the allowlist is checked first. */
     private inner class PreviewNative {
         @JavascriptInterface
+        fun isPreview(): Boolean = true
+
+        @JavascriptInterface
         fun call(method: String, id: String, argsJson: String?) {
             val args =
                 try {
@@ -187,10 +195,18 @@ class PluginPreview(
                 } catch (_: Exception) {
                     // A malformed request is refused before policy or the host bridge sees it;
                     // it never falls back to an empty argument set.
-                    refuseCall(method, id, "预览请求参数不是合法 JSON")
+                    refuseCall(
+                        method,
+                        id,
+                        PluginPreviewPolicy.BridgeFailure(
+                            PluginBridgeArguments.ERROR_CODE,
+                            "预览请求参数不是合法 JSON",
+                        ),
+                        recordPageError = true,
+                    )
                     return
                 }
-            val refusal = PluginPreviewPolicy.refuseBridgeCall(method, args)
+            val refusal = PluginPreviewPolicy.bridgeFailure(method, args)
             if (refusal != null) {
                 refuseCall(method, id, refusal)
                 return
@@ -251,16 +267,29 @@ class PluginPreview(
      * Refuses one bridge call before it runs. Streams have no call callback - the plugin SDK only
      * listens on `sse:<id>` - so a stream error must never be sent through `__pd_cb`.
      */
-    private fun refuseCall(method: String, id: String, message: String) {
-        recordError("policy", message)
-        if (method == "sseOpen")
-            emit("sse:$id", JSONObject().put("kind", "error").put("error", message))
-        else if (method == "wsOpen")
-            emit(
-                "ws:$id",
-                JSONObject().put("kind", "close").put("code", 1006).put("reason", message),
-            )
-        else reply(id, JSONObject().put("error", message))
+    private fun refuseCall(
+        method: String,
+        id: String,
+        failure: PluginPreviewPolicy.BridgeFailure,
+        recordPageError: Boolean = false,
+    ) {
+        if (recordPageError) recordError("arguments", failure.message)
+        when (PluginBridgeArguments.errorRoute(method)) {
+            PluginBridgeArguments.ErrorRoute.SSE ->
+                emit("sse:$id", failure.payload().put("kind", "error"))
+            PluginBridgeArguments.ErrorRoute.WS -> {
+                val event =
+                    JSONObject()
+                        .put("kind", "close")
+                        .put("code", 1008)
+                        .put("reason", failure.message)
+                        .put("errorCode", failure.code)
+                        .put("expected", failure.expected)
+                failure.reason?.let { event.put("previewReason", it) }
+                emit("ws:$id", event)
+            }
+            PluginBridgeArguments.ErrorRoute.CALLBACK -> reply(id, failure.payload())
+        }
     }
 
     /**
@@ -677,7 +706,7 @@ class PluginPreview(
     }
 
     private fun blockedNavigation() {
-        recordError("navigation", "预览阻止了页面跳转")
+        // Bridge navigation is an expected preview refusal; it must not poison later snapshots.
     }
 
     private fun gate() {

@@ -75,6 +75,8 @@ object PluginDeveloperBot {
             listOf(
                 "host-contract.md",
                 "page-api.md",
+                "file-api.md",
+                "browser-api.md",
                 "software-development.md",
                 "visual-standard.md",
                 "network-api.md",

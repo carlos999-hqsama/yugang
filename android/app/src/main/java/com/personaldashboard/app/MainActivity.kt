@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     private var pendingPair: String? = null
     private var pendingPlugin: String? = null
     private var lastInsets = JSONObject()
+    private var siteBrowserInsets = intArrayOf(0, 0, 0, 0)
     private var fileCb: ValueCallback<Array<Uri>>? = null
 
     private val pickFiles =
@@ -125,6 +126,7 @@ class MainActivity : ComponentActivity() {
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
             )
         val ime = ins.getInsets(WindowInsetsCompat.Type.ime())
+        siteBrowserInsets = intArrayOf(bars.top, maxOf(bars.bottom, ime.bottom), bars.left, bars.right)
         pluginShell.insets(bars.top, maxOf(bars.bottom, ime.bottom), bars.left, bars.right)
         lastInsets =
             JSONObject()
@@ -171,6 +173,7 @@ class MainActivity : ComponentActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
+                    if (pluginShell.siteBrowserBack()) return
                     if (pluginShell.back()) return
                     if (panes.back()) return
                     web.evaluateJavascript("(window.__pd_back && window.__pd_back()) ? 1 : 0") { r
@@ -202,6 +205,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        PluginSiteBrowserHost.onResume(this)
+        PluginNotificationPermission.onResume(this)
         PluginPreviewManager.onResumed()
         Thread(
                 {
@@ -226,6 +231,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        PluginSiteBrowserHost.onPause(this)
+        PluginNotificationPermission.onPause(this)
         PluginPreviewManager.onPaused()
         if (::pluginShell.isInitialized) pluginShell.pause()
         if (cfg.embedded && cfg.keepAwakeWhileRunning) DshService.protectPendingTask()
@@ -452,7 +459,13 @@ class MainActivity : ComponentActivity() {
         super.onConfigurationChanged(newConfig)
         // 折叠/展开：WebView 尺寸变化后页面自行切换布局并重新上报覆盖层矩形
         web.post { ViewCompat.requestApplyInsets(root) }
+        if (::pluginShell.isInitialized) pluginShell.siteBrowserThemeChanged()
     }
+
+    internal fun siteBrowserInsets(): IntArray = siteBrowserInsets.copyOf()
+
+    internal fun mountSiteBrowserSurface(surface: android.view.View): Boolean =
+        ::pluginShell.isInitialized && pluginShell.mountSiteBrowserSurface(surface)
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
@@ -463,7 +476,15 @@ class MainActivity : ComponentActivity() {
             pluginShell.trimHiddenPages()
     }
 
+    @Suppress("DEPRECATION")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        PluginNotificationPermission.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
     override fun onDestroy() {
+        PluginSiteBrowserHost.onDestroy(this)
+        PluginNotificationPermission.onDestroy(this)
         PluginPreviewManager.detachIfOwner(this)
         pluginShell.close()
         panes.close()

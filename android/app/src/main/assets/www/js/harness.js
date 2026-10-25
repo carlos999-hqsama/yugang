@@ -534,7 +534,7 @@ function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true }
         const activeLabel = latest && !latest.result ? (latest.approval?.state === 'asked' ? '等待授权' : String(latest.args?.description || ({read:'正在读取文件',bash:'正在执行命令',search:'正在搜索',edit:'正在编辑文件',agent:'子任务执行中'}[category(latest)] || '正在调用工具')).slice(0, 80)) : '';
         return `<details class="process-fold" data-disclosure="${esc(disclosureKey)}" data-scroll-key="${esc(key)}"${expanded ? ' open' : ''}><summary>${it.running ? '<span class="spin" style="width:12px;height:12px"></span>' : ''}<span>${esc(activeLabel || it.label)}</span><small>执行过程</small></summary><div class="process-content">${it.items.map((child, i) => renderItem(child, i)).join('')}</div></details>`;
       }
-      if (it.k === 'user') html += `<div class="ubub" data-scroll-key="${esc(key)}">${esc(it.text)}${userImagesHtml(it.content, { attachment: image => readDurableAttachment(H.sel, image) })}</div>`;
+      if (it.k === 'user') html += `<div class="ubub${!it.text?.trim() && it.content?.length && it.content.every(block => block.type === 'image') ? ' image-only' : ''}" data-scroll-key="${esc(key)}">${esc(it.text)}${userImagesHtml(it.content, { attachment: image => readDurableAttachment(H.sel, image) })}</div>`;
       else if (it.k === 'text') html += `<div class="mdw${it.live ? ' live' : ''}" data-scroll-key="${esc(key)}">${md(it.text)}</div>`;
       else if (it.k === 'think') html += `<details class="reasoning-fold" data-disclosure="${esc(H.sel + ':' + it.key)}" data-scroll-key="${esc(key)}"${H.disclosures.get(H.sel + ':' + it.key) ? ' open' : ''}><summary>${it.live ? '正在思考…' : '思考过程'}</summary><div class="think">${esc(it.text)}</div></details>`;
       else if (it.k === 'tools') html += lineFor(it);
@@ -550,7 +550,7 @@ function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true }
   }
   for (const p of H.pending.filter(x => x.sid === H.sel)) {
     const failure = p.error ? `<small class="pending-state">${p.echoed ? '发送确认失败' : '发送失败'}：${esc(p.error)} <button type="button" class="btn" data-resend="${esc(p.rpcId)}">重试</button></small>` : '';
-    if (!p.echoed) html += `<div class="ubub pending" data-scroll-key="${esc('pending:' + p.rpcId)}">${esc(p.text)}${userImagesHtml(p.content)}${failure}</div>`;
+    if (!p.echoed) html += `<div class="ubub pending${!p.text?.trim() && p.content?.length && p.content.every(block => block.type === 'image') ? ' image-only' : ''}" data-scroll-key="${esc('pending:' + p.rpcId)}">${esc(p.text)}${userImagesHtml(p.content)}${failure}</div>`;
     else if (failure) html += `<div class="sysnote" data-scroll-key="${esc('pending-error:' + p.rpcId)}">${failure}</div>`;
   }
   const pending = H.pending.findLast(p => p.sid === H.sel && !p.error);

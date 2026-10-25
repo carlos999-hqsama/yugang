@@ -99,3 +99,5 @@ try {
 `code` 包括 `http_error`、`timeout`、`cancelled`、`dns_error`、`tls_error`、`network_error`、`invalid_response`、`response_too_large`；预览断网模拟使用 `offline`。`retryable` 是传输提示，不保证写操作可安全重发。
 
 流式读取以插件、revision 和当前页面/动作实例区分内部编号；两个调用方使用同一个 requestId 不会互相读取或取消。最多16个未释放的流，每个最多64个待消费数据块；SDK持续轮询，原始桥调用方必须消费到结束或显式cancel。已完成但尚未消费的数据保留到消费、取消或owner隐藏/释放，仍计入16个槽位；不提供无限历史响应缓存。
+
+`responseType:"auto"` 将 `text/*`、`application/json`、`application/xml`、RSS/Atom 以及 `application/*+xml`/`application/*+json` 按文本返回 `text`；其他二进制返回 `base64`。显式 `text`/`base64` 优先于自动分类。

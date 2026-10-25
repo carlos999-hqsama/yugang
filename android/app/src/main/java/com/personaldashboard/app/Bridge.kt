@@ -59,6 +59,8 @@ class Bridge(
     private val navigate: ((String) -> Unit)? = null,
     private val pluginIdentity: Pair<String, String>? = null,
     private val trustedAgentVoiceSource: Boolean = false,
+    private val browserGesture: () -> Boolean = { false },
+    private val browserDownloadEvent: (JSONObject) -> Unit = {},
     private val pluginServiceHandler: ((String, JSONObject, PluginCancellation) -> JSONObject)? =
         null,
 ) {
@@ -66,9 +68,11 @@ class Bridge(
     private val voiceFrames = Executors.newSingleThreadExecutor()
     private val serviceCancellation = PluginCancellation()
     private val streamOwner = "page:" + java.util.UUID.randomUUID()
+    private val browserOwner = java.util.UUID.randomUUID().toString()
     @Volatile private var pageStreams = PluginCancellation()
     private val detachServiceStreams = serviceCancellation.onCancel { pageStreams.cancel() }
     @Volatile private var closed = false
+    private val filePreviews = FilePreviewDialog(act)
     private val bots by lazy { BotWorkspaces.get(act) }
 
     @JavascriptInterface
@@ -88,6 +92,55 @@ class Bridge(
                 rejectInvalidArguments(method, id)
                 return
             }
+        if (method == "pluginNotify" && a.optString("op") == "request") {
+            val identity = pluginIdentity
+            if (identity == null) { replyTo(id, JSONObject().put("error", "通知权限申请仅供已安装的前台插件页面使用"));return }
+            val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+            fun finish(result: JSONObject) { if (!closed && answered.compareAndSet(false, true)) replyTo(id, result) }
+            try {
+                io.execute {
+                    try {
+                        gate()
+                        act.runOnUiThread {
+                            try {
+                                if (closed) return@runOnUiThread
+                                gate()
+                                PluginPlatform.withActiveRevision(act, identity.first, identity.second) {
+                                    PluginPlatform.store(act).requireCapability(identity.first, "plugin.notification")
+                                }
+                                PluginBackground.requestNotificationPermission(act, identity.first, a) { result ->
+                                    try {
+                                        gate();serviceCancellation.check()
+                                        PluginPlatform.store(act).requireRevision(identity.first, identity.second)
+                                        finish(JSONObject().put("value", result))
+                                    } catch (_: Exception) { finish(JSONObject().put("error", "页面已失效，通知权限结果不再应用于此插件")) }
+                                }
+                            } catch (error: Exception) { finish(JSONObject().put("error", error.message ?: "无法申请通知权限")) }
+                        }
+                    } catch (error: Exception) { finish(JSONObject().put("error", error.message ?: "无法申请通知权限")) }
+                }
+            } catch (_: java.util.concurrent.RejectedExecutionException) { finish(JSONObject().put("error", "页面已关闭")) }
+            return
+        }
+        if (method == "siteBrowserOpen") {
+            val identity = pluginIdentity
+            if (identity == null) {
+                replyTo(id, JSONObject().put("error", "仅已安装插件页面可打开网站"));return
+            }
+            try {
+                io.execute {
+                    try {
+                        gate()
+                        PluginSiteBrowserHost.open(act, browserOwner, identity.first, identity.second, a, browserGesture,
+                            onClosed = { receipt ->
+                                if (!closed) runCatching { gate();replyTo(id, JSONObject().put("value", receipt)) }
+                            },
+                            onDownload = { receipt -> if (!closed) runCatching { gate();browserDownloadEvent(receipt) } })
+                    } catch (error: Exception) { if (!closed) replyTo(id, JSONObject().put("error", error.message ?: "网站未打开")) }
+                }
+            } catch (_: java.util.concurrent.RejectedExecutionException) { if (!closed) replyTo(id, JSONObject().put("error", "页面已关闭，网站未打开")) }
+            return
+        }
         if (method == "agentVoiceScope" || method == "agentVoiceFrame") {
             if (!trustedAgentVoiceSource) {
                 replyTo(id, JSONObject().put("error", "此接口只供核心对话使用"))
@@ -185,6 +238,8 @@ class Bridge(
     fun close() {
         closed = true
         serviceCancellation.cancel()
+        filePreviews.close()
+        PluginSiteBrowserHost.closeOwner(browserOwner)
         detachServiceStreams()
         io.shutdownNow()
         voiceFrames.shutdownNow()
@@ -253,7 +308,12 @@ class Bridge(
                 act.openPluginManager()
                 true
             }
-            "plugins" -> PluginPlatform.manage(act, a, serviceCancellation)
+            "plugins" -> {
+                val identity = pluginIdentity
+                if (a.optString("action") == "fetch" && identity != null)
+                    PluginPlatform.pageFetch(act, identity.first, identity.second, a, serviceCancellation)
+                else PluginPlatform.manage(act, a, serviceCancellation)
+            }
             "pluginVoice" -> {
                 val identity = pluginIdentity ?: error("仅供可见插件页面使用")
                 act.pluginVoice.call(identity.first, identity.second, a, serviceCancellation)
@@ -300,6 +360,7 @@ class Bridge(
             "pluginMedia" -> pluginService("plugin.media", a)
             "pluginBackground" -> pluginService("plugin.background", a)
             "pluginNotify" -> pluginService("plugin.notification", a)
+            "pluginApiSession" -> pluginService("plugin.apiSession", a)
             "deepseekModels" -> DeepseekModels().read(a.optString("key").takeIf { it.isNotBlank() } ?: cfg.deepseekKey)
             "getConfig" -> act.publicConfig()
             "setConfig" -> {
@@ -326,6 +387,11 @@ class Bridge(
                 true
             }
             "backgroundSettings" -> act.openBackgroundSettings(a.optString("which"))
+            "previewFile" -> {
+                filePreviews.show(FileTextContent.fromJson(a))
+                JSONObject().put("preview", true)
+            }
+            "openFile" -> DownloadedFiles.open(act, a)
             "bots" -> bots.call(a)
             "http" -> {
                 if (

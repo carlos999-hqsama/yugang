@@ -307,6 +307,8 @@ class PluginPage(
             ::ready,
             ::navigate,
             pluginIdentity = id to revision,
+            browserGesture = { alive() && visible && consumeRecentGesture() },
+            browserDownloadEvent = { emit("browserDownload", it) },
         )
 
     @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
@@ -512,7 +514,7 @@ class PluginPage(
         surface.forbidden(status, reason)
 
     private fun consumeRecentGesture(): Boolean {
-        val recent = SystemClock.elapsedRealtime() - gestureAt <= GESTURE_MS
+        val recent = gestureAt > 0 && SystemClock.elapsedRealtime() - gestureAt <= GESTURE_MS
         gestureAt = 0
         return recent
     }

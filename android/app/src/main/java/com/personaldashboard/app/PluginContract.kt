@@ -19,6 +19,8 @@ object PluginContract {
             "plugin.tts",
             "plugin.background",
             "plugin.notification",
+            "plugin.apiSession",
+            "plugin.browser",
         )
 
     fun id(value: String): String = value.also {

@@ -33,6 +33,11 @@ object PluginPreviewPolicy {
     const val DEFAULT_SLOW_NETWORK_DELAY_MS = 2_000L
     const val MAX_NETWORK_DELAY_MS = 10_000L
 
+    /** Expected preview refusals are operation results, not renderer/page failures. */
+    const val PREVIEW_REASON = "preview"
+    const val PREVIEW_POLICY_CODE = "preview_policy_denied"
+    const val PREVIEW_BROWSER_CODE = "preview_browser_disabled"
+
     /** A preview session is closed after this idle time or after the total lifetime. */
     const val IDLE_TIMEOUT_MS = 90_000L
     const val MAX_LIFETIME_MS = 10 * 60_000L
@@ -68,6 +73,24 @@ object PluginPreviewPolicy {
     val READ_ONLY_MANAGEMENT = setOf("read", "list")
     /** Actions of the host capabilities that would write or trigger work. */
     private val READ_METHODS = setOf("GET", "HEAD")
+
+    private val BROWSER_METHODS = setOf("browser", "siteBrowserOpen")
+
+    /** Structured failure returned only to the call that the preview policy refused. */
+    data class BridgeFailure(
+        val code: String,
+        val message: String,
+        val reason: String? = null,
+        val expected: Boolean = false,
+    ) {
+        fun payload(): JSONObject =
+            JSONObject()
+                .put("error", message)
+                .put("code", code)
+                .put("expected", expected)
+                .put("retryable", false)
+                .apply { reason?.let { put("reason", it) } }
+    }
 
     fun allowAudio(request: JSONObject): Boolean {
         if (!request.has("allowAudio")) return false
@@ -180,6 +203,8 @@ object PluginPreviewPolicy {
 
     /** Reason why a bridge call must be refused inside the preview, or null when it is allowed. */
     fun refuseBridgeCall(method: String, args: JSONObject?): String? {
+        if (method == "siteBrowserOpen") return "预览不会打开真实网站"
+        if (method == "pluginNotify") return if (args?.optString("op") == "status") null else "预览仅允许查询通知权限，不会发送或申请通知"
         if (method == "pluginModel")
             return if (args?.optString("op") == "budget") "预览不允许修改模型预算" else null
         if (method in READ_ONLY_METHODS) return null
@@ -198,6 +223,17 @@ object PluginPreviewPolicy {
             return "预览只允许读取插件状态"
         }
         return "预览不允许调用宿主能力 $method"
+    }
+
+    /** Adds stable SDK metadata without weakening the allowlist or entering the real Bridge. */
+    fun bridgeFailure(method: String, args: JSONObject?): BridgeFailure? {
+        val message = refuseBridgeCall(method, args) ?: return null
+        return BridgeFailure(
+            code = if (method in BROWSER_METHODS) PREVIEW_BROWSER_CODE else PREVIEW_POLICY_CODE,
+            message = message,
+            reason = PREVIEW_REASON,
+            expected = true,
+        )
     }
 
     /** Lifecycle of one preview session. */

@@ -1,5 +1,6 @@
 package com.personaldashboard.app
 
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -41,22 +42,39 @@ class PluginBackgroundPolicyTest {
         store.put(next)
         store.markRun(old.pluginId, 123L, "cancelled", 100L, old.generation)
         assertEquals("never",store.get(old.pluginId)!!.lastStatus)
+        assertNull(PluginBackgroundPolicy.lastResult(store.get(old.pluginId)!!))
         store.markRun(next.pluginId, 124L, "ok", 120L, next.generation)
         assertEquals("ok",store.get(next.pluginId)!!.lastStatus)
+        assertEquals(
+            next.generation,
+            PluginBackgroundPolicy.lastResult(store.get(next.pluginId)!!)!!.getString("generation"),
+        )
     }
 
     @Test
     fun `generation receipt after removal does not recreate schedule`() {
-        val store = PluginBackgroundStore(directory())
+        val dir = directory()
+        val store = PluginBackgroundStore(dir)
         val old = record()
         store.put(old)
         val read = store.get(old.pluginId)!!
         store.remove(read.pluginId)
 
-        store.markRun(read.pluginId, 123L, "preempted", -1L, read.generation)
+        store.markRun(
+            read.pluginId,
+            123L,
+            "preempted",
+            -1L,
+            read.generation,
+            result = PluginBackgroundPolicy.ActionResult("LATE_RESULT_CANARY"),
+            errorMessage = "LATE_ERROR_CANARY",
+        )
 
         assertNull(store.get(old.pluginId))
         assertTrue(store.all().isEmpty())
+        val disk = java.io.File(dir, "background.json").readText()
+        assertFalse(disk.contains("LATE_RESULT_CANARY"))
+        assertFalse(disk.contains("LATE_ERROR_CANARY"))
     }
 
     @Test
@@ -77,6 +95,8 @@ class PluginBackgroundPolicyTest {
         assertEquals(100L, current.lastRunAtMs)
         assertEquals("ok", current.lastStatus)
         assertEquals(50L, current.lastDurationMs)
+        assertEquals(next.generation, PluginBackgroundPolicy.lastResult(current)!!.getString("generation"))
+        assertNull(PluginBackgroundPolicy.lastError(current))
     }
 
     @Test
@@ -242,6 +262,7 @@ class PluginBackgroundPolicyTest {
         assertEquals(500L, status.getLong("lastDurationMs"))
         assertEquals(PluginBackgroundPolicy.MAX_RUN_MS, status.getLong("maxRunMs"))
         assertFalse(status.has("payload"))
+        assertFalse(status.toString().contains("secret"))
         assertFalse(status.toString().contains("payload-secret"))
     }
 
@@ -343,5 +364,352 @@ class PluginBackgroundPolicyTest {
             try { PluginBackgroundPolicy.intervalMinutes(value); throw AssertionError("Overflow or out-of-range interval accepted") }
             catch (_: IllegalArgumentException) { }
         }
+    }
+
+    @Test
+    fun `execution receipts are bounded generation-bound and errors use a fixed safe catalog`() {
+        val store = PluginBackgroundStore(directory())
+        val item = record()
+        store.put(item)
+        store.markRun(item.pluginId, 123L, "failed", 500L, item.generation)
+
+        val current = store.get(item.pluginId)!!
+        val status = PluginBackgroundPolicy.statusJson(current, true, nowMs = 1_000L)
+        val result = status.getJSONObject("lastResult")
+        val error = status.getJSONObject("lastError")
+        assertEquals("execution_receipt", result.getString("kind"))
+        assertEquals(item.generation, result.getString("generation"))
+        assertEquals("failed", result.getString("status"))
+        assertFalse(result.getBoolean("ok"))
+        assertEquals(123L, result.getLong("finishedAtMs"))
+        assertEquals("failed", error.getString("code"))
+        assertEquals("后台动作执行失败", error.getString("message"))
+        assertTrue(result.toString().toByteArray().size <= 1024)
+        assertTrue(error.toString().toByteArray().size <= 512)
+        assertFalse(status.toString().contains("Exception"))
+        assertFalse(status.toString().contains("tool"))
+        assertFalse(status.toString().contains("model"))
+
+        store.markRun(item.pluginId, 456L, "ok", 100L, item.generation)
+        val recovered = PluginBackgroundPolicy.statusJson(store.get(item.pluginId), true, 1_000L)
+        assertTrue(recovered.getJSONObject("lastResult").getBoolean("ok"))
+        assertTrue(recovered.isNull("lastError"))
+    }
+
+    @Test
+    fun `old generation cannot replace either result or error receipt`() {
+        val dir = directory()
+        val store = PluginBackgroundStore(dir)
+        val old = record()
+        store.put(old)
+        val next = record(action = "sync", revision = "r2")
+        store.put(next)
+        store.markRun(
+            next.pluginId,
+            100L,
+            "ok",
+            50L,
+            next.generation,
+            result = PluginBackgroundPolicy.ActionResult(JSONObject().put("owner", "current")),
+        )
+        val before = store.get(next.pluginId)!!
+
+        store.markRun(
+            old.pluginId,
+            999L,
+            "failed",
+            900L,
+            old.generation,
+            result = PluginBackgroundPolicy.ActionResult(JSONObject().put("owner", "old")),
+            errorMessage = "OLD_GENERATION_ERROR_CANARY",
+        )
+
+        val after = store.get(next.pluginId)!!
+        assertEquals(
+            PluginBackgroundPolicy.lastResult(before).toString(),
+            PluginBackgroundPolicy.lastResult(after).toString(),
+        )
+        assertEquals(
+            PluginBackgroundPolicy.lastError(before)?.toString(),
+            PluginBackgroundPolicy.lastError(after)?.toString(),
+        )
+        assertEquals(100L, after.lastRunAtMs)
+        assertEquals("ok", after.lastStatus)
+        assertEquals(
+            "current",
+            PluginBackgroundPolicy.lastResult(after)!!
+                .getJSONObject("result")
+                .getString("owner"),
+        )
+        val disk = java.io.File(dir, "background.json").readText()
+        assertFalse(disk.contains("OLD_GENERATION_ERROR_CANARY"))
+    }
+
+    @Test
+    fun `next run is explicitly estimated and disappears when system has no schedule`() {
+        val item = record()
+        val created = PluginBackgroundPolicy.statusJson(item, true, nowMs = 100L)
+        assertEquals(item.createdAtMs + item.intervalMs, created.getLong("nextRunAt"))
+        assertTrue(created.getBoolean("nextRunAtEstimated"))
+
+        val ran = item.copy(lastRunAtMs = 2_000_000L, lastStatus = "ok", lastDurationMs = 20L)
+        val afterRun = PluginBackgroundPolicy.statusJson(ran, true, nowMs = 2_100_000L)
+        assertEquals(2_000_000L + item.intervalMs, afterRun.getLong("nextRunAt"))
+        assertTrue(afterRun.getBoolean("nextRunAtEstimated"))
+
+        val overdue = PluginBackgroundPolicy.statusJson(ran, true, nowMs = 9_000_000L)
+        assertEquals(9_000_000L, overdue.getLong("nextRunAt"))
+        assertTrue(overdue.getBoolean("nextRunAtEstimated"))
+        assertTrue(PluginBackgroundPolicy.statusJson(ran, false, 2_100_000L).isNull("nextRunAt"))
+        assertTrue(PluginBackgroundPolicy.statusJson(null, false, 2_100_000L).isNull("nextRunAt"))
+    }
+
+    @Test
+    fun `never-run and unscheduled records do not invent execution results`() {
+        val never = PluginBackgroundPolicy.statusJson(record(), false, nowMs = 100L)
+        assertTrue(never.isNull("lastResult"))
+        assertTrue(never.isNull("lastError"))
+        assertTrue(never.isNull("nextRunAt"))
+
+        val missing = PluginBackgroundPolicy.statusJson(null, false, nowMs = 100L)
+        assertEquals("never", missing.getString("lastStatus"))
+        assertTrue(missing.isNull("lastResult"))
+        assertTrue(missing.isNull("lastError"))
+        assertTrue(missing.isNull("nextRunAt"))
+    }
+
+    @Test
+    fun `explicit numeric and summary results survive reload without view or state`() {
+        val dir = directory()
+        val store = PluginBackgroundStore(dir)
+        val item = record()
+        store.put(item)
+        val invoked =
+            JSONObject()
+                .put("result", 37)
+                .put("view", JSONObject().put("text", "VIEW_CANARY"))
+                .put("state", JSONObject().put("private", "STATE_CANARY"))
+        val explicit = PluginBackgroundPolicy.explicitActionResult(invoked)!!
+
+        store.markRun(item.pluginId, 123L, "ok", 20L, item.generation, result = explicit)
+
+        var receipt = PluginBackgroundPolicy.lastResult(store.get(item.pluginId)!!)!!
+        assertEquals("action_result", receipt.getString("kind"))
+        assertTrue(receipt.getBoolean("hasActionResult"))
+        assertEquals(37, receipt.getInt("result"))
+        assertEquals("json", receipt.getString("format"))
+        assertFalse(receipt.getBoolean("truncated"))
+
+        val summary =
+            JSONObject()
+                .put("summary", "同步完成 3 条")
+                .put("count", 3)
+                .put("fresh", true)
+        store.markRun(
+            item.pluginId,
+            456L,
+            "ok",
+            30L,
+            item.generation,
+            result = PluginBackgroundPolicy.ActionResult(summary),
+        )
+
+        val reloaded = PluginBackgroundStore(dir).get(item.pluginId)!!
+        receipt = PluginBackgroundPolicy.lastResult(reloaded)!!
+        val result = receipt.getJSONObject("result")
+        assertEquals("同步完成 3 条", result.getString("summary"))
+        assertEquals(3, result.getInt("count"))
+        assertTrue(result.getBoolean("fresh"))
+        assertEquals(item.generation, receipt.getString("generation"))
+        val disk = java.io.File(dir, "background.json").readText()
+        assertTrue(disk.contains("同步完成 3 条"))
+        assertFalse(disk.contains("VIEW_CANARY"))
+        assertFalse(disk.contains("STATE_CANARY"))
+    }
+
+    @Test
+    fun `sensitive request header and log canaries never reach result storage`() {
+        val dir = directory()
+        val store = PluginBackgroundStore(dir)
+        val item = record()
+        store.put(item)
+        val canaries =
+            listOf(
+                "CANARY_TOKEN",
+                "CANARY_COOKIE",
+                "CANARY_AUTHORIZATION",
+                "CANARY_PASSWORD",
+                "CANARY_SECRET",
+                "CANARY_API_KEY",
+                "CANARY_HEADER",
+                "CANARY_REQUEST",
+                "CANARY_LOG",
+                "CANARY_TEXT",
+            )
+        val result =
+            JSONObject()
+                .put("summary", "safe summary")
+                .put("count", 2)
+                .put("token", canaries[0])
+                .put(
+                    "nested",
+                    JSONObject()
+                        .put("cookie", canaries[1])
+                        .put("authorization", canaries[2])
+                        .put("password", canaries[3])
+                        .put("client_secret", canaries[4])
+                        .put("apiKey", canaries[5])
+                        .put("healthy", true),
+                )
+                .put("headers", JSONObject().put("x-fixture", canaries[6]))
+                .put("request", JSONObject().put("body", canaries[7]))
+                .put("logs", JSONArray().put(canaries[8]))
+                .put("text", "token=" + canaries[9])
+
+        store.markRun(
+            item.pluginId,
+            123L,
+            "ok",
+            20L,
+            item.generation,
+            result = PluginBackgroundPolicy.ActionResult(result),
+        )
+
+        val disk = java.io.File(dir, "background.json").readText()
+        canaries.forEach { canary -> assertFalse("leaked $canary", disk.contains(canary)) }
+        val receipt =
+            PluginBackgroundPolicy.lastResult(PluginBackgroundStore(dir).get(item.pluginId)!!)!!
+        val stored = receipt.getJSONObject("result")
+        assertTrue(receipt.getBoolean("redacted"))
+        assertEquals("safe summary", stored.getString("summary"))
+        assertEquals(2, stored.getInt("count"))
+        assertTrue(stored.getJSONObject("nested").getBoolean("healthy"))
+        assertFalse(stored.has("token"))
+        assertFalse(stored.has("headers"))
+        assertFalse(stored.has("request"))
+        assertFalse(stored.has("logs"))
+        assertFalse(stored.getString("text").contains(canaries[9]))
+    }
+
+    @Test
+    fun `oversize results stay within 4KiB and expose explicit truncation`() {
+        val dir = directory()
+        val store = PluginBackgroundStore(dir)
+        val item = record()
+        store.put(item)
+        val result = JSONObject()
+        for (index in 0 until 32) result.put("field$index", "x".repeat(500))
+
+        store.markRun(
+            item.pluginId,
+            123L,
+            "ok",
+            20L,
+            item.generation,
+            result = PluginBackgroundPolicy.ActionResult(result),
+        )
+
+        val reloaded = PluginBackgroundStore(dir).get(item.pluginId)!!
+        val receipt = PluginBackgroundPolicy.lastResult(reloaded)!!
+        assertTrue(receipt.getBoolean("truncated"))
+        assertEquals("json_prefix", receipt.getString("format"))
+        assertTrue(receipt.get("result") is String)
+        assertTrue(receipt.getString("result").endsWith("…"))
+        assertEquals(reloaded.lastActionResult, receipt.getString("result"))
+        PluginBackgroundStore(dir).put(reloaded)
+        assertEquals(
+            reloaded.lastActionResult,
+            PluginBackgroundStore(dir).get(item.pluginId)!!.lastActionResult,
+        )
+        assertTrue(
+            PluginBackgroundPolicy.resultJson(reloaded.lastActionResult)
+                .toByteArray(Charsets.UTF_8)
+                .size <= PluginBackgroundPolicy.MAX_ACTION_RESULT_BYTES,
+        )
+    }
+
+    @Test
+    fun `recorded errors are bounded and redacted while raw request errors fall back`() {
+        val dir = directory()
+        val store = PluginBackgroundStore(dir)
+        val item = record()
+        store.put(item)
+        store.markRun(
+            item.pluginId,
+            123L,
+            "failed",
+            20L,
+            item.generation,
+            errorMessage =
+                "HTTP 401 token=ERROR_TOKEN_CANARY, retry later " +
+                    "https://fixture.invalid/ERROR_URL_CANARY",
+        )
+
+        var error = PluginBackgroundPolicy.lastError(store.get(item.pluginId)!!)!!
+        assertEquals("failed", error.getString("code"))
+        assertEquals("recorded", error.getString("messageSource"))
+        assertTrue(error.getString("message").startsWith("HTTP 401"))
+        assertTrue(error.getString("message").contains("retry later"))
+        assertTrue(error.getBoolean("redacted"))
+        assertFalse(error.getString("message").contains("ERROR_TOKEN_CANARY"))
+        assertFalse(error.getString("message").contains("ERROR_URL_CANARY"))
+        val recordedDisk = java.io.File(dir, "background.json").readText()
+        assertFalse(recordedDisk.contains("ERROR_TOKEN_CANARY"))
+        assertFalse(recordedDisk.contains("ERROR_URL_CANARY"))
+
+        store.markRun(
+            item.pluginId,
+            124L,
+            "failed",
+            20L,
+            item.generation,
+            errorMessage = "x".repeat(2_000),
+        )
+        error = PluginBackgroundPolicy.lastError(store.get(item.pluginId)!!)!!
+        assertTrue(error.getBoolean("truncated"))
+        assertTrue(error.getString("message").toByteArray(Charsets.UTF_8).size <= 512)
+
+        store.markRun(
+            item.pluginId,
+            456L,
+            "failed",
+            20L,
+            item.generation,
+            errorMessage = "{\"request\":\"RAW_REQUEST_CANARY\"}",
+        )
+        error = PluginBackgroundPolicy.lastError(PluginBackgroundStore(dir).get(item.pluginId)!!)!!
+        assertEquals("fallback", error.getString("messageSource"))
+        assertEquals("后台动作执行失败", error.getString("message"))
+        assertFalse(java.io.File(dir, "background.json").readText().contains("RAW_REQUEST_CANARY"))
+
+        store.markRun(
+            item.pluginId,
+            457L,
+            "failed",
+            20L,
+            item.generation,
+            errorMessage = "request: RAW_REQUEST_CANARY",
+        )
+        error = PluginBackgroundPolicy.lastError(store.get(item.pluginId)!!)!!
+        assertEquals("fallback", error.getString("messageSource"))
+        assertFalse(java.io.File(dir, "background.json").readText().contains("RAW_REQUEST_CANARY"))
+    }
+
+    @Test
+    fun `missing explicit result is honest for current and legacy receipts`() {
+        val store = PluginBackgroundStore(directory())
+        val item = record()
+        store.put(item)
+        store.markRun(item.pluginId, 123L, "ok", 20L, item.generation)
+        val current = PluginBackgroundPolicy.lastResult(store.get(item.pluginId)!!)!!
+        assertEquals("execution_receipt", current.getString("kind"))
+        assertFalse(current.getBoolean("hasActionResult"))
+        assertEquals("not_returned", current.getString("resultUnavailableReason"))
+        assertFalse(current.has("result"))
+
+        val legacy = item.copy(lastRunAtMs = 100L, lastStatus = "ok", lastDurationMs = 10L)
+        val fallback = PluginBackgroundPolicy.lastResult(legacy)!!
+        assertFalse(fallback.getBoolean("hasActionResult"))
+        assertEquals("legacy_or_not_recorded", fallback.getString("resultUnavailableReason"))
     }
 }

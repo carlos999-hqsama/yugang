@@ -9,6 +9,8 @@
 | 需求拆解、实现方式与状态管理 | [通用软件开发规范](software-development.md) |
 | 创建或改动页面 | [统一视觉规范](visual-standard.md)、[页面接口](page-api.md) |
 | 远程请求、图片和错误处理 | [联网接口](network-api.md) |
+| 文本文件、App 内预览与下载句柄 | [交付文件](file-api.md) |
+| 站内网站、独立登录空间与 API 会话 | [站内浏览器与登录](browser-api.md) |
 | 模型、翻译、后台任务或通知 | [宿主服务](service-api.md) |
 | 草稿交互、截图、错误态与交付验证 | [独立预览](preview-api.md) |
 | 安装、更新、启停、卸载 | 本文件的管理与清理章节 |

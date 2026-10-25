@@ -98,3 +98,9 @@ apksigner verify --verbose --print-certs yugang-core-release.apk
 保存签名 APK、源码归档、runtime、许可材料与 SBOM 的摘要及公开证书指纹。比较签名前后 ZIP 的原成员内容；只允许增加签名元数据，不更换代码或资源。设备安装后再次核对 APK 摘要、包名、版本和非 Debuggable 状态。
 
 首次安装测试使用独立测试环境，检查冷启动、运行时初始化、空白配置、默认 Bot、插件引导和重启。更新安装须使用相同包名和签名，保留已有数据；回退时使用兼容的版本码，不通过清除用户数据绕过兼容问题。
+
+## 文本文件回归
+
+Android JVM 定向运行 FileTextContentTest、PluginMimeTest、PluginFetchResponseTest（最后一组需要本机环回端口）。设备验收需合成 HTML/MD/CSV/JSON 与超 2 MiB 文件，核对 App 内查看器、超限下载提示及本 App 下载 URI 的系统查看器打开。JVM 通过不替代手机验收。文本预览只在内存，下载保留在系统 Download/鱼缸；回滚代码不删除已有下载。
+
+浏览器/会话验收：先检查 WebView MULTI_PROFILE。仅在专用空白 ARM64 模拟器运行 browserSeed/apiSessionSeed，强制停止 App 后运行 browserVerify/apiSessionVerify；使用无凭据的本机合成服务，检查独立 profile、Keystore 重载、更新保留、卸载与晚到响应、下载、无宿主桥。notificationFoundation 使用真实 Android 权限允许/拒绝与预览 status/request 边界。临时服务和模拟器在验收后清理；真实用户登录不以合成结果冒充。
