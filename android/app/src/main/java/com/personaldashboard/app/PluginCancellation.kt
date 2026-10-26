@@ -8,18 +8,21 @@ class PluginCancellation {
 
     private val hooks = mutableListOf<() -> Unit>()
 
-    @Synchronized
     fun cancel() {
-        if (cancelled) return
-        cancelled = true
-        val pending = hooks.toList()
-        hooks.clear()
+        val pending = synchronized(this) {
+            if (cancelled) return
+            cancelled = true
+            hooks.toList().also { hooks.clear() }
+        }
+        // A child hook may detach from this parent. Never run external code under this lock.
         pending.forEach { runCatching(it) }
     }
 
-    @Synchronized
     fun onCancel(hook: () -> Unit): () -> Unit {
-        if (cancelled) hook() else hooks += hook
+        val invokeNow = synchronized(this) {
+            if (cancelled) true else { hooks += hook;false }
+        }
+        if (invokeNow) hook()
         return { synchronized(this) { hooks.remove(hook); Unit } }
     }
 

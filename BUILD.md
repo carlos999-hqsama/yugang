@@ -106,3 +106,13 @@ apksigner verify --verbose --print-certs yugang-core-release.apk
 Android JVM 定向运行 FileTextContentTest、PluginMimeTest、PluginFetchResponseTest（最后一组需要本机环回端口）。设备验收需合成 HTML/MD/CSV/JSON 与超 2 MiB 文件，核对 App 内查看器、超限下载提示及本 App 下载 URI 的系统查看器打开。JVM 通过不替代手机验收。文本预览只在内存，下载保留在系统 Download/鱼缸；回滚代码不删除已有下载。
 
 浏览器/会话设备验收尚需在专用空白 ARM64 模拟器或授权设备逐项检查：WebView MULTI_PROFILE、独立 profile、Keystore 重载、更新保留、卸载与晚到响应、下载、无宿主桥；通知还需核对真实系统允许/拒绝及预览 status/request 边界。公开工程现有 browserBoundary、notificationDenied/Granted 等旧场景不覆盖上述完整新流程；没有 browserSeed/browserVerify/apiSessionSeed/apiSessionVerify/notificationFoundation 场景，不应作为可执行命令。使用无凭据合成服务，临时服务和模拟器在验收后清理；真实用户登录不以合成结果冒充。页面框架检查入口已纳入预览结构化拒绝的 JavaScript 回归。
+
+## 7. 对话附件回归（2026-10-26）
+
+```sh
+PD_DSH_VENDOR_ROOT="$(pwd)/.rtbuild/dl/dsh" node --test scripts/workspace-tests/chat-attachments.test.mjs
+```
+
+该组直接执行生产附件 handler，覆盖精确历史引用授权、冷历史读取、Unicode 名称、完整流和 prefix/suffix/open Range、越界 416、中止、背压及生命周期释放。Android 的 BotAttachmentTransferTest 用本机 HTTP 测试服务核对真实上传字节、认证仅在原生、receipt 复用/失效、响应上限与取消；ChatContentPolicyTest 验证 Bot 工作区、特殊文件名、附件地址和范围读取。界面交互回归覆盖 6 图独立预览/移除、图片回显交接、文件发送结果未知的重试、上传取消和暂存凭据失效。
+
+设备仍须实测系统选择器（含云文件）、大视频上传取消/重试、后台切换、真实 WebView MULTI_PROFILE、视频编码/拖动播放、PDF/Office 系统查看器、Download/鱼缸保存与打开。浏览器合成数据截图和 JVM/Node 检查不替代这些设备业务验收。

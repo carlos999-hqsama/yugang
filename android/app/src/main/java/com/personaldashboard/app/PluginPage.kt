@@ -360,7 +360,7 @@ class PluginPage(
                                 (req.url.scheme == "http" || req.url.scheme == "https") &&
                                     (consumeRecentGesture() || req.hasGesture())
                             ) {
-                                activity.openExternal(url)
+                                PluginSiteBrowserHost.openUserLink(activity, "page-link:${this@PluginPage.id}", this@PluginPage.id, this@PluginPage.revision, url)
                             }
                             return true
                         }
@@ -380,7 +380,7 @@ class PluginPage(
                             callback: ValueCallback<Array<Uri>>,
                             params: FileChooserParams,
                         ): Boolean {
-                            activity.choosePluginImages { uris ->
+                            activity.choosePluginFiles(params) { uris ->
                                 activity.runOnUiThread {
                                     if (!alive() || uris.isEmpty()) callback.onReceiveValue(null)
                                     else callback.onReceiveValue(uris.toTypedArray())

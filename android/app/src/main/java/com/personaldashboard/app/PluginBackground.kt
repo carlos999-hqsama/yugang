@@ -437,7 +437,7 @@ object PluginBackground {
                 android.os.PersistableBundle().apply { putString("generation", record.generation) },
             )
             .setPeriodic(record.intervalMs)
-            .setPersisted(false)
+            .setPersisted(true)
             .setBackoffCriteria(
                 JobInfo.DEFAULT_INITIAL_BACKOFF_MILLIS,
                 JobInfo.BACKOFF_POLICY_LINEAR,

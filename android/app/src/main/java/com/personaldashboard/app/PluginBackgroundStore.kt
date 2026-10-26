@@ -2,9 +2,6 @@ package com.personaldashboard.app
 
 import android.content.Context
 import java.io.File
-import java.io.FileOutputStream
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
@@ -12,9 +9,15 @@ import org.json.JSONObject
 /**
  * Host-private background state. All instances for the same canonical path share a lock and every
  * transaction reloads from disk; no process-wide mutable cache is used.
+ *
+ * Every save is atomic and rotates the previous valid file to `background.json.bak`. A damaged
+ * primary file is never treated as empty or overwritten: reads and writes fail explicitly while
+ * the original bytes and backup remain on disk for manual recovery.
  */
 class PluginBackgroundStore(directory: File) {
     private val file = File(directory, "background.json")
+    private val backupFile = File(directory, "background.json.bak")
+    private val recoveryDirectory = File(directory, "recovery")
     private val lock = pathLock(file.absoluteFile.canonicalPath)
 
     constructor(context: Context) : this(File(context.filesDir, "plugin-background"))
@@ -273,15 +276,23 @@ class PluginBackgroundStore(directory: File) {
     }
 
     private fun loadRequired(): JSONObject {
-        if (!file.isFile) {
-            return JSONObject().put("schedules", JSONObject()).put("notifications", JSONObject())
+        if(!file.exists()&&!backupFile.exists())return JSONObject().put("schedules",JSONObject()).put("notifications",JSONObject())
+        val read=try {PluginAtomicStorage.readJson(file,backupFile,MAX_BACKGROUND_BYTES,::validateRoot)}catch(failure:Exception){
+            val semantic=generateSequence(failure as Throwable?){it.cause}.firstOrNull{it.message in setOf("宿主插件后台通知存储损坏，已停止后台状态操作","插件通知计数损坏，已停止后台状态操作","宿主插件后台存储结构损坏，已停止后台状态操作")}
+            throw IllegalStateException(semantic?.message?:"宿主插件后台存储损坏，已停止后台状态操作",failure)
         }
-        val parsed = runCatching {
-            JSONObject(file.readText())
+        if(read.recovered){
+            PluginAtomicStorage.writeBytesAtomically(file,read.value.toString().toByteArray(Charsets.UTF_8),backup=backupFile,recoveryDirectory=recoveryDirectory,maxExistingBytes=MAX_BACKGROUND_BYTES,previousUsable={isJsonObjectBytes(it)})
         }
-            .getOrElse {
-                throw IllegalStateException("宿主插件后台存储损坏，已停止后台状态操作", it)
-            }
+        return read.value
+    }
+
+    fun recoveryStatus(): JSONObject = synchronized(lock){
+        try{loadRequired();JSONObject().put("status",if(recoveryDirectory.listFiles().orEmpty().any{it.isFile})"recovered" else "ok").put("recoveryAvailable",recoveryDirectory.listFiles().orEmpty().any{it.isFile})}
+        catch(_:Exception){JSONObject().put("status","unavailable").put("writable",false)}
+    }
+
+    private fun validateRoot(parsed:JSONObject) {
         if (parsed.opt("schedules") !is JSONObject) {
             error("宿主插件后台存储结构损坏，已停止后台状态操作")
         }
@@ -311,24 +322,23 @@ class PluginBackgroundStore(directory: File) {
                 }
             }
         }
-        return parsed
     }
 
+
     private fun save(next: JSONObject) {
-        file.parentFile?.mkdirs()
-        check(file.parentFile?.isDirectory == true) { "无法创建宿主插件后台目录" }
-        val temp = File(file.parentFile, "background.new")
-        FileOutputStream(temp).use { output ->
-            output.write(next.toString().toByteArray())
-            output.fd.sync()
-        }
-        Files.move(
-            temp.toPath(),
-            file.toPath(),
-            StandardCopyOption.ATOMIC_MOVE,
-            StandardCopyOption.REPLACE_EXISTING,
+        val bytes = next.toString().toByteArray(Charsets.UTF_8)
+        PluginAtomicStorage.writeBytesAtomically(
+            file,
+            bytes,
+            backup = backupFile,
+            recoveryDirectory = recoveryDirectory,
+            maxExistingBytes = MAX_BACKGROUND_BYTES,
+            previousUsable = { isJsonObjectBytes(it) },
         )
     }
+
+    private fun isJsonObjectBytes(bytes: ByteArray): Boolean =
+        runCatching { validateRoot(PluginAtomicStorage.parseJsonObject(bytes)) }.isSuccess
 
     data class ScheduleRecord(
         val pluginId: String,
@@ -381,6 +391,7 @@ class PluginBackgroundStore(directory: File) {
     }
 
     companion object {
+        private const val MAX_BACKGROUND_BYTES = 16L * 1024 * 1024
         private val locks = ConcurrentHashMap<String, Any>()
 
         internal fun pathLock(path: String): Any = locks.getOrPut(path) { Any() }

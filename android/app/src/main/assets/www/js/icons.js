@@ -1,5 +1,6 @@
 // SVG 图标：取自设计稿 build.py 的 S 字典（原样），另补充少量同风格图标
 export const S = {
+"clip": "<svg class=\"ico\" viewBox=\"0 0 24 24\"><path d=\"m8 13 7-7a3 3 0 0 1 4 4L9 20a5 5 0 0 1-7-7L13 2\"/></svg>",
 "plus": "<svg class=\"ico\" viewBox=\"0 0 24 24\"><path d=\"M12 5v14M5 12h14\"/></svg>",
 "edit": "<svg class=\"ico\" viewBox=\"0 0 24 24\"><path d=\"M4 20h4L19 9l-4-4L4 16z\"/></svg>",
 "pin": "<svg class=\"ico\" viewBox=\"0 0 24 24\"><path d=\"M9 3h6l-1 6 4 4H6l4-4zM12 13v8\"/></svg>",

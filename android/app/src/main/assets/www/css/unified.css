@@ -623,3 +623,31 @@ input,textarea,select{accent-color:var(--ui-primary)}
 
 /* Keyboard focus uses a neutral fill instead of a rectangular outline. */
 :where(a,button,summary,[role="button"]):focus-visible{background-color:var(--ui-soft,#f0f0f0)}
+
+/* Draft thumbnails never exceed the composer, and inspection is separate from removal. */
+#scr-harness .draft-attachments{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:10px;margin:0 0 12px;padding:5px 4px 0;max-width:100%}
+#scr-harness .draft-attachment{position:relative;min-width:0}
+#scr-harness .draft-preview{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;width:100%;min-height:66px;padding:4px;border:1px solid var(--ui-line);border-radius:9px;background:var(--ui-soft);color:var(--ui-text);font:inherit;cursor:pointer;overflow:hidden}
+#scr-harness .draft-preview img{width:100%;height:60px;object-fit:cover;border-radius:5px}
+#scr-harness .draft-preview span:not(.draft-file-kind){width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+#scr-harness .draft-preview small{font-size:10px;color:var(--ui-muted)}
+#scr-harness .draft-file-kind{font-size:20px;line-height:22px}
+#scr-harness .draft-remove{position:absolute;right:-4px;top:-5px;display:grid;place-items:center;width:26px;height:26px;border:1px solid var(--ui-line-strong);border-radius:50%;background:var(--ui-surface);cursor:pointer}
+#scr-harness .draft-remove .ico{width:12px;height:12px}
+#scr-harness .msgs a{color:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;overflow-wrap:anywhere}
+#scr-harness .msgs a:focus-visible,#scr-harness .draft-preview:focus-visible,#scr-harness .draft-remove:focus-visible{outline:2px solid var(--ui-focus);outline-offset:2px}
+#scr-harness .chat-files{display:flex;flex-direction:column;gap:8px;margin-top:8px;max-width:100%}
+#scr-harness .chat-file{display:flex;gap:8px;align-items:center;max-width:100%;padding:9px;border:1px solid currentColor;border-radius:10px}
+#scr-harness .chat-file-open{display:flex;gap:10px;align-items:center;flex:1;min-width:0;border:0;background:none;padding:0;color:inherit;text-align:left;font:inherit;cursor:pointer}
+#scr-harness .chat-file-icon{font-size:22px;flex:none}
+#scr-harness .chat-file-info{min-width:0;overflow-wrap:anywhere}
+#scr-harness .chat-file-info b{display:block;font-size:13px;font-weight:500}
+#scr-harness .chat-file-info small{display:block;font-size:11px;opacity:.7}
+#scr-harness .chat-file-save{flex:none;border:1px solid currentColor;border-radius:7px;background:transparent;padding:6px 8px;color:inherit;font:inherit;cursor:pointer}
+#scr-harness .chat-image-slot{max-width:180px;min-width:0}
+#scr-harness .image-retry{display:block;border:0;background:none;color:inherit;font:inherit;font-size:11px;text-decoration:underline;cursor:pointer;margin-top:4px}
+#sheet .chat-image-view{display:block;max-width:100%;object-fit:contain}
+#scr-harness .art-open{display:flex;gap:10px;align-items:center;flex:1;min-width:0;border:0;padding:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
+#scr-harness .art-info{flex:1;min-width:0;overflow-wrap:anywhere}
+#scr-harness .art-info b,#scr-harness .art-info small{display:block}
+#scr-harness .art-save{flex:none}

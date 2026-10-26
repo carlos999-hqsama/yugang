@@ -75,6 +75,15 @@ export function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t 
 /** 极简、安全的 Markdown → HTML（先转义再标记），够用于对话气泡 */
 const FILE_RE = /^(?:\.{0,2}\/|~\/)?[\w.@~-]+(?:\/[\w.@~-]+)*\.(?:html?|md|png|jpe?g|gif|svg|webp|pdf|txt|json|csv)$/i;
 export function isFileLike(s) { return FILE_RE.test(s); }
+function trimUrlPunctuation(raw) {
+  let url=raw.replace(/[。，、；！？,.!?;:）】]+$/u,'');
+  while (/[)\]]$/.test(url)) {
+    const close=url.at(-1),open=close===')'?'(': '[';
+    if ([...url].filter(c=>c===close).length <= [...url].filter(c=>c===open).length) break;
+    url=url.slice(0,-1);
+  }
+  return url;
+}
 function inline(s, options = {}) {
   const codes = [], links = [];
   s = s.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
@@ -90,21 +99,35 @@ function inline(s, options = {}) {
       html = `<button type="button" class="chat-image" data-art="${esc(image.path)}" aria-label="查看图片：${esc(label || '图片')}"><img src="${esc(image.url)}" alt="${esc(label || '图片')}" loading="lazy"><span class="chat-image-failure" hidden>图片读取失败，点击重试查看</span></button>`;
     } else {
       if (!/^(?:https?:\/\/|\/(?!\/)|\.\.?\/)/i.test(target) && !/^[^:\n]+\.(?:html?|md|png|jpe?g|gif|svg|webp|pdf|txt|json|csv)(?:#[^\n]*)?$/i.test(target)) return raw;
-      html = `<a data-href="${esc(target)}">${esc(label)}</a>`;
+      html = `<a href="${esc(target)}" data-href="${esc(target)}">${esc(label)}</a>`;
     }
     links.push(html);
     return `\u0001${links.length - 1}\u0001`;
   });
+  // Isolate URLs before escaping, without linkifying code or already-parsed destinations.
+  s = s.replace(/https?:\/\/[^\s<>\u0000\u0001]+/gi, raw => {
+    const url = trimUrlPunctuation(raw);
+    links.push(`<a href="${esc(url)}" data-href="${esc(url)}">${esc(url)}</a>`);
+    return `\u0001${links.length - 1}\u0001${raw.slice(url.length)}`;
+  });
   s = esc(s)
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
-    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<i>$2</i>')
-    .replace(/(^|[\s(（])(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?[^\s)）<]*)/g, (_, p, u) => `${p}<a data-href="${u}">${u}</a>`);
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<i>$2</i>');
   s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => {
     const c = codes[+i];
     return isFileLike(c) ? `<code class="fl" data-file="${esc(c)}">${esc(c)}</code>` : `<code>${esc(c)}</code>`;
   });
   // Restore generated HTML last so code placeholders cannot be expanded inside attributes.
   return s.replace(/\u0001(\d+)\u0001/g, (_, i) => links[+i] || '');
+}
+
+/** User text stays literal while HTTP(S) links retain keyboard and touch semantics. */
+export function linkText(text) {
+  return String(text || '').split(/(https?:\/\/[^\s<>]+)/gi).map(part => {
+    if (!/^https?:\/\//i.test(part)) return esc(part);
+    const url = trimUrlPunctuation(part);
+    return `<a href="${esc(url)}" data-href="${esc(url)}">${esc(url)}</a>${esc(part.slice(url.length))}`;
+  }).join('');
 }
 export function md(src, options = {}) {
   const lines = String(src || '').replace(/[\r\u0000\u0001]/g, '').split('\n');

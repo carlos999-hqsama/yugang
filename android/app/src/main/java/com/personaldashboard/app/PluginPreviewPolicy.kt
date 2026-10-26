@@ -203,6 +203,8 @@ object PluginPreviewPolicy {
 
     /** Reason why a bridge call must be refused inside the preview, or null when it is allowed. */
     fun refuseBridgeCall(method: String, args: JSONObject?): String? {
+        if (method == "hostCapabilities") return null
+        if (method == "hostCall" || method == "notificationAccess") return "预览不会读取个人通知、选择文件或发起系统交互"
         if (method == "siteBrowserOpen") return "预览不会打开真实网站"
         if (method == "pluginNotify") return if (args?.optString("op") == "status") null else "预览仅允许查询通知权限，不会发送或申请通知"
         if (method == "pluginModel")

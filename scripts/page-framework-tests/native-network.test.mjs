@@ -13,6 +13,8 @@ globalThis.window = {PDNative: {call(method, id, argsJson) {
   const value = handler(method, JSON.parse(argsJson)) ?? {ok: true};
   setImmediate(() => globalThis.window.__pd_cb(id, JSON.stringify(value?.__error || {value})));
 }}};
+const lifecycle = new EventTarget();
+window.addEventListener=lifecycle.addEventListener.bind(lifecycle);window.removeEventListener=lifecycle.removeEventListener.bind(lifecycle);window.dispatchEvent=lifecycle.dispatchEvent.bind(lifecycle);
 const {native} = await import(nativeUrl);
 
 function respondWith(fn) {

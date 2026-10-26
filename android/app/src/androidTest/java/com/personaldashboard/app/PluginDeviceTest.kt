@@ -19,6 +19,24 @@ class PluginDeviceTest : Instrumentation() {
     private var scenario: String? = null
     override fun onCreate(arguments: Bundle?) { scenario=arguments?.getString("scenario");super.onCreate(arguments);start() }
     override fun onStart() {
+        if(scenario=="coreBoot") {
+            val result=Bundle()
+            try{PluginCoreBootDeviceChecks(this).run();result.putString("stream","PASS: coreBoot\n");finish(Activity.RESULT_OK,result)}
+            catch(e:Throwable){result.putString("stream","FAIL: coreBoot: ${e.message}\n${e.stackTrace.take(6).joinToString("\n")}\n");finish(Activity.RESULT_CANCELED,result)}
+            return
+        }
+        if(scenario=="foundation") {
+            val result=Bundle()
+            try{PluginFoundationDeviceChecks(this).run();result.putString("stream","PASS: foundation\n");finish(Activity.RESULT_OK,result)}
+            catch(e:Throwable){result.putString("stream","FAIL: foundation: ${e.message}\n${e.stackTrace.take(6).joinToString("\n")}\n");finish(Activity.RESULT_CANCELED,result)}
+            return
+        }
+        if(scenario=="notificationRead") {
+            val result=Bundle()
+            try{PluginNotificationReadDeviceChecks(this).run();result.putString("stream","PASS: notificationRead\n");finish(Activity.RESULT_OK,result)}
+            catch(e:Throwable){result.putString("stream","FAIL: notificationRead: ${e.message}\n${e.stackTrace.take(6).joinToString("\n")}\n");finish(Activity.RESULT_CANCELED,result)}
+            return
+        }
         if(scenario=="previewIdle"){ verifyPreviewIdle();return }
         if(scenario in setOf("a11yPlain","pluginLinkActivation","modalRendererRecovery","pageCache","mediaOrientation","previewLifecycle","previewStreams","originStorage","tarBoundaries","runtimeExtract","removalRecovery","previewStorage","notificationCollision","backgroundRegistry","developerContract","secretIntegrity","insets","backgroundPreemption","notificationDenied","notificationGranted","runtimeDependencies","browserBoundary")) {
             val result=Bundle()

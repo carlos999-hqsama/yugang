@@ -208,7 +208,8 @@ function parseAttrs(el, source) {
   let m;
   while ((m = re.exec(source || ''))) {
     const value = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4] !== undefined ? m[4] : '';
-    el.setAttribute(m[1], value);
+    // HTML parses attribute entities before exposing href/dataset, just like real WebView.
+    el.setAttribute(m[1], value.replace(/&(amp|quot|apos|lt|gt|#39);/g, (_, entity) => ({amp:'&',quot:'"',apos:"'",lt:'<',gt:'>','#39':"'"}[entity])));
   }
 }
 

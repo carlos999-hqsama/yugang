@@ -15,6 +15,14 @@ spec.loader.exec_module(export_source)
 
 
 class ExportSourceTests(unittest.TestCase):
+    def test_java_regressions_in_android_sources_are_exported(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = Path("android/app/src/test/java/example/NetworkRaceTest.java")
+            (root / relative).parent.mkdir(parents=True)
+            (root / relative).write_text("class NetworkRaceTest {}\n")
+            self.assertIn(relative, export_source._source_candidates(root))
+
     def test_source_roots_and_selected_file_parents_cannot_be_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "source"
