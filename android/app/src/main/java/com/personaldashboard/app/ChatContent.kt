@@ -114,7 +114,7 @@ internal class ChatContent(private val activity: MainActivity, private val net: 
                 return WebResourceResponse("text/html", "utf-8", 200, "OK", mapOf("Cache-Control" to "no-store", "Content-Security-Policy" to "default-src 'none'; style-src 'unsafe-inline'"), html.byteInputStream())
             }
         }
-        val kept = response.headers.names().filter { it.lowercase() in setOf("accept-ranges", "content-range", "content-length", "etag", "last-modified") }.associateWith { response.header(it).orEmpty() } + mapOf("Cache-Control" to "no-store", "X-Content-Type-Options" to "nosniff")
+        val kept = ChatContentPolicy.responseHeaders(mime, response.headers.names().associateWith { response.header(it).orEmpty() })
         WebResourceResponse(mime, "utf-8".takeIf { PluginMime.isText(mime) }, response.code, response.message.ifBlank { "Response" }, kept, object : FilterInputStream(body.byteStream()) { override fun close() { try { super.close() } finally { response.close() } } })
     } catch (_: Exception) { forbidden(502, "Bad Gateway") } }
 
@@ -149,6 +149,6 @@ internal class ChatContent(private val activity: MainActivity, private val net: 
             return DownloadedFiles.receipt(activity, uri, name, mime, count)
         } catch (error: Exception) { resolver.delete(uri, null, null);throw error }
     }
-    private fun response(input: InputStream, mime: String, length: Long, status: Int, headers: Map<String,String>) = WebResourceResponse(mime, null, status, "OK", headers + mapOf("Content-Length" to length.toString(), "Cache-Control" to "no-store"), input)
+    private fun response(input: InputStream, mime: String, length: Long, status: Int, headers: Map<String,String>) = WebResourceResponse(mime, null, status, "OK", ChatContentPolicy.responseHeaders(mime, headers + mapOf("Content-Length" to length.toString())), input)
     private fun forbidden(status: Int = 403, reason: String = "Forbidden") = WebResourceResponse("text/plain", "utf-8", status, reason, emptyMap(), ByteArray(0).inputStream())
 }

@@ -33,19 +33,25 @@ function call(method, args = {}) {
   if (pending.size >= 64) return Promise.reject(Object.assign(new Error('页面调用过多，请稍后重试'),{code:'busy'}));
   return new Promise((resolve, reject) => {
     const id = `c${++seq}`;
-    const interactive = method === 'siteBrowserOpen' || method === 'voice' || (method === 'hostCall' && ['pick','create','directory','send','request','configure','authorize','camera','calendar','contact','location','pair','unpair','connect'].includes(args.arguments?.op));
+    const interactive = ['siteBrowserOpen','voice','botAttachmentPick','contentOpen'].includes(method) || (method === 'hostCall' && ['pick','create','directory','send','request','configure','authorize','camera','calendar','contact','location','pair','unpair','connect'].includes(args.arguments?.op));
+    const cancelNative = () => {
+      try {
+        if (method === 'hostCall') A.call('hostCancel', `cancel-${id}`, JSON.stringify({requestId:id}));
+        else if (method === 'botAttachmentUpload' && args.requestId) A.call('botAttachmentCancel', `cancel-${id}`, JSON.stringify({requestId:args.requestId}));
+      } catch {}
+    };
     const timer = interactive ? null : setTimeout(() => {
       if (!pending.delete(id)) return;
-      if (method === 'hostCall') try { A.call('hostCancel', `cancel-${id}`, JSON.stringify({requestId:id})); } catch {}
+      cancelNative();
       reject(Object.assign(new Error('宿主调用超时'),{code:'timeout',timeout:true}));
     },90000);
-    pending.set(id, {resolve, reject,timer});
+    pending.set(id, {resolve, reject,timer,cancelNative});
     try { A.call(method, id, JSON.stringify(args)); }
     catch (error) { pending.delete(id);clearTimeout(timer);reject(error); }
   });
 }
 function releasePendingCalls() {
-  for (const request of pending.values()) {clearTimeout(request.timer);request.reject(Object.assign(new Error('页面已关闭'),{code:'cancelled',cancelled:true}));}
+  for (const request of pending.values()) {clearTimeout(request.timer);request.cancelNative();request.reject(Object.assign(new Error('页面已关闭'),{code:'cancelled',cancelled:true}));}
   pending.clear();
 }
 window.addEventListener('pagehide',releasePendingCalls);
@@ -81,7 +87,7 @@ const devPanes = {
 };
 /* ------------------------------------------------------------------ public API */
 export const isAndroid = !!A;
-/** dsh 产物文件的本地代理地址（原生拦截该主机名并用 cookie 去 dsh /api/file 取文件，去掉 CSP sandbox） */
+/** dsh 文件的原生代理地址；交互文档使用独立、无同源权限的 sandbox。 */
 export const FILE_BASE = A ? 'https://dshfile.pd.local' : `${location.origin}/__dev/dshfile`;
 export const fileUrl = (abs) => FILE_BASE + (abs.startsWith('/') ? abs : '/' + abs).split('/').map(encodeURIComponent).join('/');
 export const fileFromUrl = (u) => {

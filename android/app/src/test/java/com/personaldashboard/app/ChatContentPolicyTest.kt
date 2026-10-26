@@ -5,6 +5,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChatContentPolicyTest {
+    @Test fun `active documents retain interactivity without provider origin or CORS grants`() {
+        for (mime in listOf("text/html", "image/svg+xml", "Text/HTML; charset=utf-8")) {
+            val headers = ChatContentPolicy.responseHeaders(mime, mapOf("Access-Control-Allow-Origin" to "*", "Set-Cookie" to "synthetic=1", "Content-Length" to "42"))
+            assertEquals("sandbox allow-scripts", headers["Content-Security-Policy"])
+            assertEquals("42", headers["Content-Length"])
+            assertFalse(headers.keys.any { it.equals("Access-Control-Allow-Origin", true) || it.equals("Set-Cookie", true) })
+            assertEquals("no-store", headers["Cache-Control"])
+        }
+    }
+    @Test fun `only known download policy is translated and other upstream policies stay enforced`() {
+        assertEquals(ChatContentPolicy.DOCUMENT_SANDBOX, ChatContentPolicy.responseHeaders("text/html", mapOf("content-security-policy" to "sandbox; default-src 'none'"))["Content-Security-Policy"])
+        assertEquals("default-src 'none', sandbox allow-scripts", ChatContentPolicy.responseHeaders("text/html", mapOf("CONTENT-SECURITY-POLICY" to "default-src 'none'"))["Content-Security-Policy"])
+        val media = ChatContentPolicy.responseHeaders("video/mp4", mapOf("Content-Range" to "bytes 0-9/42", "Content-Security-Policy" to "default-src 'none'"))
+        assertEquals("bytes 0-9/42", media["Content-Range"])
+        assertEquals("default-src 'none'", media["Content-Security-Policy"])
+        assertFalse(ChatContentPolicy.responseHeaders("image/png", emptyMap()).containsKey("Content-Security-Policy"))
+    }
     @Test fun `document names retain spaces hashes and question marks without URL queries`() {
         val path = "/BOT/default/documents/窄屏 #1?.html"
         val target = ChatContentPolicy.target(JSONObject().put("path",path),"/BOT/default")

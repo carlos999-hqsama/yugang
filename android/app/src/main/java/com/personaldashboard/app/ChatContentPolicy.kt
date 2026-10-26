@@ -9,6 +9,22 @@ import org.json.JSONObject
 internal object ChatContentPolicy {
     const val MAX_DOWNLOAD_BYTES = 256L * 1024 * 1024
     const val FILE_HOST = "dshfile.pd.local"
+    // Scripts and CDN assets remain usable, but documents cannot read the provider's origin.
+    const val DOCUMENT_SANDBOX = "sandbox allow-scripts"
+    fun responseHeaders(mime: String, upstream: Map<String, String>): Map<String, String> {
+        val kept = upstream.filterKeys { it.lowercase(Locale.ROOT) in setOf("accept-ranges", "content-range", "content-length", "etag", "last-modified", "content-security-policy") }.toMutableMap()
+        val cspKey = kept.keys.firstOrNull { it.equals("Content-Security-Policy", true) }
+        val csp = cspKey?.let { kept.remove(it) }?.trim()
+        val active = mime.substringBefore(';').trim().lowercase(Locale.ROOT) in setOf("text/html", "image/svg+xml")
+        if (active) {
+            // The API's download-only policy becomes the isolated interactive document policy.
+            // Any other upstream policy remains independently enforced, never relaxed.
+            kept["Content-Security-Policy"] = if (csp.isNullOrEmpty() || csp == "sandbox; default-src 'none'") DOCUMENT_SANDBOX else "$csp, $DOCUMENT_SANDBOX"
+        } else if (!csp.isNullOrEmpty()) kept["Content-Security-Policy"] = csp
+        kept["Cache-Control"] = "no-store"
+        kept["X-Content-Type-Options"] = "nosniff"
+        return kept
+    }
     data class Target(val url: String, val upstream: String, val name: String, val mime: String, val workspace: String, val attachment: Boolean)
 
     fun name(raw: String): String = raw.substringAfterLast('/').substringAfterLast('\\')

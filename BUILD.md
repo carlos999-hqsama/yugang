@@ -116,3 +116,5 @@ PD_DSH_VENDOR_ROOT="$(pwd)/.rtbuild/dl/dsh" node --test scripts/workspace-tests/
 该组直接执行生产附件 handler，覆盖精确历史引用授权、冷历史读取、Unicode 名称、完整流和 prefix/suffix/open Range、越界 416、中止、背压及生命周期释放。Android 的 BotAttachmentTransferTest 用本机 HTTP 测试服务核对真实上传字节、认证仅在原生、receipt 复用/失效、响应上限与取消；ChatContentPolicyTest 验证 Bot 工作区、特殊文件名、附件地址和范围读取。界面交互回归覆盖 6 图独立预览/移除、图片回显交接、文件发送结果未知的重试、上传取消和暂存凭据失效。
 
 设备仍须实测系统选择器（含云文件）、大视频上传取消/重试、后台切换、真实 WebView MULTI_PROFILE、视频编码/拖动播放、PDF/Office 系统查看器、Download/鱼缸保存与打开。浏览器合成数据截图和 JVM/Node 检查不替代这些设备业务验收。
+
+Core6 补充验证：`node --test scripts/page-framework-tests/core-bridge.test.mjs` 覆盖真实宿主桥的交互期限、上传取消和迟到回执。`ChatContentPolicyTest` 覆盖 HTML/SVG 隔离、上游 CSP 保留及媒体 Range。浏览器夹具验证交互脚本/CDN 可运行且同源文件读取与存储被阻止；此结果不代替 Android WebView 真机验收。资源紧张时构建使用 `--max-workers=1`，避免与其他重构建并行。
