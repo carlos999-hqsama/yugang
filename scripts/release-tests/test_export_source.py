@@ -15,6 +15,29 @@ spec.loader.exec_module(export_source)
 
 
 class ExportSourceTests(unittest.TestCase):
+    def test_device_video_fixture_is_required_and_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            consumer = root / "android/app/src/androidTest/java/com/personaldashboard/app/PluginFoundationDeviceChecks.kt"
+            fixture = Path("android/app/src/androidTest/assets/foundation-video.mp4")
+            consumer.parent.mkdir(parents=True)
+            consumer.write_text('// assets.open("foundation-video.mp4")\n')
+            with self.assertRaisesRegex(ValueError, "required test fixture"):
+                export_source._validate_test_fixtures(root)
+            target = root / fixture
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"synthetic test video")
+            export_source._validate_test_fixtures(root)
+            self.assertIn(fixture, export_source._source_candidates(root))
+
+    def test_java_regressions_in_android_sources_are_exported(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = Path("android/app/src/test/java/example/NetworkRaceTest.java")
+            (root / relative).parent.mkdir(parents=True)
+            (root / relative).write_text("class NetworkRaceTest {}\n")
+            self.assertIn(relative, export_source._source_candidates(root))
+
     def test_source_roots_and_selected_file_parents_cannot_be_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "source"

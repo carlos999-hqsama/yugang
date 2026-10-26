@@ -82,6 +82,7 @@ object PluginDeveloperBot {
                 "network-api.md",
                 "preview-api.md",
                 "service-api.md",
+                "system-api.md",
             )) {
             val text =
                 context.assets.open("plugin-developer/$name").bufferedReader().use { it.readText() }

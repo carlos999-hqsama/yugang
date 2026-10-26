@@ -207,6 +207,7 @@ class PageRuntime {
   }
 
   async unload() {
+    window.dispatchEvent(new Event('pd-plugin-dispose'));
     await this.hide();
     await this.definition.onUnload?.(this.context);
     this.mounted = false;

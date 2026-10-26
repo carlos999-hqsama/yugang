@@ -137,13 +137,13 @@ function showBootNotice(message, failed = false) {
   if (!bootNotice) {
     bootNotice = document.createElement('div');
     bootNotice.id = 'pd-boot-status';
-    bootNotice.setAttribute('role', failed ? 'alert' : 'status');
     bootNotice.setAttribute('aria-live', 'polite');
     bootNotice.style.cssText = 'padding:28px 24px;color:#8a8a90;font-size:14px;line-height:1.8;max-width:560px';
     bootNotice.addEventListener('click', (e) => {
       if (e.target.closest('[data-boot-retry]')) retryBoot();
     });
   }
+  bootNotice.setAttribute('role', failed ? 'alert' : 'status');
   bootNotice.innerHTML = `<p style="margin:0 0 6px;color:#1d1d1f;font-size:16px">${failed ? '读取启动配置失败' : '正在启动…'}</p><p style="margin:0">${esc(message)}</p>${failed ? '<button type="button" class="btn dk" data-boot-retry style="margin-top:14px">重试</button>' : ''}`;
   placeBootNotice();
 }
@@ -151,6 +151,7 @@ function showBootNotice(message, failed = false) {
 function placeBootNotice() {
   if (!bootNotice) return;
   const scr = $('#scr-' + tab) || $('#scr-harness');
+  if (booting) for (const t of TABS) $('#scr-' + t.id)?.classList.toggle('on', t.id === tab);
   if (scr && bootNotice.parentNode !== scr) scr.appendChild(bootNotice);
 }
 

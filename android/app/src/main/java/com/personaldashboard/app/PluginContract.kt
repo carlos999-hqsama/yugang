@@ -11,6 +11,7 @@ object PluginContract {
     const val MAX_VIEW_TEXT_CHARS = 16000
     val capabilities =
         setOf(
+            "plugin.files", "plugin.transfer", "plugin.share", "plugin.notifications.read", "plugin.connection", "plugin.system",
             "app.call",
             "plugin.state",
             "plugin.model",
@@ -71,6 +72,7 @@ object PluginContract {
         ) {
             "插件 state 必须是最多32KiB的对象"
         }
+        PluginInvocationBudget.validateBundle(bundle)
         return JSONObject(bundle.toString())
     }
 

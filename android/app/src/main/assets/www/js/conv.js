@@ -84,7 +84,7 @@ export class Conv {
         }
         case 'assistant/message': {
           for (const [blockIndex, b] of (d.message?.content || []).entries()) {
-            if (b.type === 'text' && b.text?.trim()) items.push({ k: 'text', text: b.text, cwd, seq: e.seq });
+            if (b.type === 'text' && b.text?.trim()) items.push({ k: 'text', text: b.text, cwd, seq: e.seq, bi: blockIndex });
             else if ((b.type === 'thinking' || b.type === 'reasoning') && (b.text || b.thinking)) items.push({ k: 'think', text: b.text || b.thinking, key: `think:${e.seq}:${blockIndex}` });
             else if (b.type === 'tool-call') {
               const a = parseArgs(b.arguments);
@@ -108,11 +108,11 @@ export class Conv {
             for (const p of extra) items.push({ k: 'art', path: p, cwd });
           }
           const kind = d.reason?.kind;
-          if (kind && kind !== 'completed') items.push({ k: 'note', text: kind === 'cancelled' || kind === 'interrupted' || kind === 'aborted' ? '已停止' : `本轮结束：${d.reason?.message || kind}` });
+          if (kind && kind !== 'completed') items.push({ k: 'note', text: kind === 'cancelled' || kind === 'interrupted' || kind === 'aborted' ? '已停止' : `本轮结束：${d.reason?.message || kind}`, seq: e.seq });
           turn = null;
           break;
         }
-        case 'permission/preset': if (items.some((x) => x.k === 'user')) items.push({ k: 'note', text: `权限已切换为「${permLabel(d.preset)}」` }); break;
+        case 'permission/preset': if (items.some((x) => x.k === 'user')) items.push({ k: 'note', text: `权限已切换为「${permLabel(d.preset)}」`, seq: e.seq }); break;
         case 'model/selection': break;
         default: break;
       }
@@ -121,12 +121,12 @@ export class Conv {
     for (const [attemptId, a] of this.live) {
       for (const [blockIndex, b] of a.blocks.entries()) {
         if (!b) continue;
-        if (b.type === 'text' && b.text) items.push({ k: 'text', text: b.text, live: !b.done, cwd });
+        if (b.type === 'text' && b.text) items.push({ k: 'text', text: b.text, live: !b.done, cwd, key: `live-text:${attemptId}:${blockIndex}` });
         else if (['thinking', 'reasoning'].includes(b.type) && b.text) items.push({ k: 'think', text: b.text, live: !b.done, key: `think:${attemptId}:${blockIndex}` });
         else if (b.type === 'tool-call' && b.name && !calls.has(b.id)) items.push({ k: 'tool', id: b.id, name: b.name, args: parseArgs(b.args), pending: true, streaming: true, cwd });
       }
     }
-    if (running && (!ended || this.live.size > 0) && !this.hasLiveOutput()) items.push({ k: 'working' });
+    if (running && (!ended || this.live.size > 0) && !this.hasLiveOutput()) items.push({ k: 'working', key: 'working' });
     if (turn) markProcess(items, turn);
     return foldProcess(groupTools(items));
   }

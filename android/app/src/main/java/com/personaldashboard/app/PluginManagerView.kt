@@ -30,6 +30,7 @@ internal fun pluginManagerView(
     onAdd: () -> Unit,
     onEnable: (String, Boolean) -> Unit,
     onRemove: (JSONObject) -> Unit,
+    recovery: JSONObject? = null,
 ): LinearLayout {
     val ink = Color.rgb(32, 32, 35)
     val muted = Color.rgb(122, 122, 129)
@@ -90,6 +91,12 @@ internal fun pluginManagerView(
             LinearLayout.LayoutParams(-2, dp(40)).apply { leftMargin = dp(12) },
         )
         addView(head, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
+        val recoveryState=recovery?.optString("status","ok")?:"ok"
+        if(recoveryState!="ok")addView(label(when(recoveryState){
+            "recovered"->"插件数据已从保留副本恢复，请核对最近的设置。"
+            "unavailable"->"插件数据暂不可用，原文件已保留。请勿卸载或清空应用。"
+            else->"部分插件数据需要恢复；其余插件可继续使用。"
+        },13f,muted),LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(14)})
         val list =
             LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL

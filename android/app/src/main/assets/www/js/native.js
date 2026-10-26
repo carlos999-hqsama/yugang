@@ -8,15 +8,54 @@ const pending = new Map();
 const listeners = new Map(); // channel -> Set(fn)
 let seq = 0;
 
-window.__pd_cb = (id, json) => { const p = pending.get(id); if (!p) return; pending.delete(id); const r = typeof json === 'string' ? JSON.parse(json) : json; r && r.error ? p.reject(Object.assign(new Error(r.error), r)) : p.resolve(r ? r.value : undefined); };
-window.__pd_ev = (channel, json) => { const v = typeof json === 'string' ? JSON.parse(json) : json; (listeners.get(channel) || []).forEach((fn) => { try { fn(v); } catch (e) { console.error(e); } }); };
+window.__pd_cb = (id, json) => {
+  const request = pending.get(id);
+  if (!request) return;
+  pending.delete(id);
+  clearTimeout(request.timer);
+  try {
+    const value = typeof json === 'string' ? JSON.parse(json) : json;
+    if (value && value.error) request.reject(Object.assign(new Error(value.error), value));
+    else request.resolve(value ? value.value : undefined);
+  } catch { request.reject(Object.assign(new Error('宿主返回了无效结果'), {code:'invalid_response'})); }
+};
+window.__pd_ev = (channel, json) => {
+  let value;
+  try { value = typeof json === 'string' ? JSON.parse(json) : json; }
+  catch { return; }
+  (listeners.get(channel) || []).forEach(fn => { try { fn(value); } catch (error) { console.error(error); } });
+};
 export function on(channel, fn) { if (!listeners.has(channel)) listeners.set(channel, new Set()); listeners.get(channel).add(fn); return () => listeners.get(channel).delete(fn); }
 const emit = (ch, v) => window.__pd_ev(ch, v);
 
 function call(method, args = {}) {
-  if (A) return new Promise((resolve, reject) => { const id = `c${++seq}`; pending.set(id, { resolve, reject }); A.call(method, id, JSON.stringify(args)); });
-  return dev.call(method, args);
+  if (!A) return dev.call(method, args);
+  if (pending.size >= 64) return Promise.reject(Object.assign(new Error('页面调用过多，请稍后重试'),{code:'busy'}));
+  return new Promise((resolve, reject) => {
+    const id = `c${++seq}`;
+    const interactive = ['siteBrowserOpen','voice','botAttachmentPick','contentOpen'].includes(method) || (method === 'hostCall' && ['pick','create','directory','send','request','configure','authorize','camera','calendar','contact','location','pair','unpair','connect'].includes(args.arguments?.op));
+    const cancelNative = () => {
+      try {
+        if (method === 'hostCall') A.call('hostCancel', `cancel-${id}`, JSON.stringify({requestId:id}));
+        else if (method === 'botAttachmentUpload' && args.requestId) A.call('botAttachmentCancel', `cancel-${id}`, JSON.stringify({requestId:args.requestId}));
+      } catch {}
+    };
+    const timer = interactive ? null : setTimeout(() => {
+      if (!pending.delete(id)) return;
+      cancelNative();
+      reject(Object.assign(new Error('宿主调用超时'),{code:'timeout',timeout:true}));
+    },90000);
+    pending.set(id, {resolve, reject,timer,cancelNative});
+    try { A.call(method, id, JSON.stringify(args)); }
+    catch (error) { pending.delete(id);clearTimeout(timer);reject(error); }
+  });
 }
+function releasePendingCalls() {
+  for (const request of pending.values()) {clearTimeout(request.timer);request.cancelNative();request.reject(Object.assign(new Error('页面已关闭'),{code:'cancelled',cancelled:true}));}
+  pending.clear();
+}
+window.addEventListener('pagehide',releasePendingCalls);
+window.addEventListener('pd-plugin-dispose',releasePendingCalls);
 
 /* ------------------------------------------------------------------ dev shim */
 const dev = {
@@ -30,30 +69,13 @@ const dev = {
     if (method === 'openExternal') { window.open(args.url, '_blank'); return true; }
     if (method === 'openDshbox') { emit('toast', { text: '（开发模式）将打开 DSHBox' }); return false; }
     if (method === 'voice') throw new Error('开发模式不支持语音输入');
-    if (method === 'browser' || method === 'dshWeb') return devPanes[method](args);
+    if (method === 'dshWeb') return devPanes.dshWeb(args);
     const r = await fetch('/__dev/call', { method: 'POST', body: JSON.stringify({ method, args }) });
     const j = await r.json(); if (j.error) throw Object.assign(new Error(j.error), j); return j.value;
   },
 };
 // 开发模式下用 iframe 模拟原生浏览器覆盖层
-const frames = new Map();
 const devPanes = {
-  browser(st) {
-    const host = document.querySelector('#scr-harness .bview');
-    if (!host) return true;
-    for (const [id, f] of frames) if (!st.tabs.some((t) => t.id === id)) { f.remove(); frames.delete(id); }
-    for (const t of st.tabs) {
-      let f = frames.get(t.id);
-      if (!f) {
-        f = document.createElement('iframe'); f.dataset.tab = t.id; host.appendChild(f); frames.set(t.id, f);
-        f.addEventListener('load', () => { let title = ''; try { title = f.contentDocument.title; } catch { /* cross-origin */ } emit('browser', { tabId: t.id, url: f.dataset.url, title, loading: false, progress: 100, canBack: false, canFwd: false }); });
-      }
-      if (t.url && f.dataset.url !== t.url) { f.dataset.url = t.url; f.src = devUrl(t.url); }
-      f.style.display = st.visible && t.id === st.active ? 'block' : 'none';
-    }
-    if (st.cmd === 'reload' && frames.get(st.active)) frames.get(st.active).src = frames.get(st.active).src;
-    return true;
-  },
   dshWeb(st) {
     const vp = document.querySelector('#scr-harness .dshweb .vp');
     if (!vp) return true;
@@ -63,15 +85,9 @@ const devPanes = {
     return true;
   },
 };
-function devUrl(u) {
-  if (u.startsWith(FILE_BASE)) return u;
-  if (/^https?:\/\/(127\.0\.0\.1|localhost):3080\//.test(u)) return '/__dev/dshweb/' + u.replace(/^https?:\/\/[^/]+\//, '');
-  return u;
-}
-
 /* ------------------------------------------------------------------ public API */
 export const isAndroid = !!A;
-/** dsh 产物文件的本地代理地址（原生拦截该主机名并用 cookie 去 dsh /api/file 取文件，去掉 CSP sandbox） */
+/** dsh 文件的原生代理地址；交互文档使用独立、无同源权限的 sandbox。 */
 export const FILE_BASE = A ? 'https://dshfile.pd.local' : `${location.origin}/__dev/dshfile`;
 export const fileUrl = (abs) => FILE_BASE + (abs.startsWith('/') ? abs : '/' + abs).split('/').map(encodeURIComponent).join('/');
 export const fileFromUrl = (u) => {
@@ -80,6 +96,16 @@ export const fileFromUrl = (u) => {
 };
 
 export const native = {
+  capabilities: () => call('hostCapabilities'),
+  host: (capability, arguments_ = {}) => call('hostCall',{capability,arguments:arguments_}),
+  files: request => call('hostCall',{capability:'plugin.files',arguments:request}),
+  transfer: request => call('hostCall',{capability:'plugin.transfer',arguments:request}),
+  notifications: (request = {op:'status'}) => call('hostCall',{capability:'plugin.notifications.read',arguments:request}),
+  share: request => call('hostCall',{capability:'plugin.share',arguments:request}),
+  connections: request => call('hostCall',{capability:'plugin.connection',arguments:request}),
+  system: request => call('hostCall',{capability:'plugin.system',arguments:request}),
+  browserSnapshot: () => call('hostCall',{capability:'plugin.browser',arguments:{op:'snapshot'}}),
+
   call,
   getConfig: () => call('getConfig'),
   deepseekModels: (key = '') => call('deepseekModels', {key}),
@@ -98,8 +124,17 @@ export const native = {
   rtRestart: () => call('rtRestart'),
   backgroundSettings: (which) => call('backgroundSettings', { which }),
   bots: (a = { op: 'list' }) => call('bots', a),
+  chooseFiles: () => call('botAttachmentPick'),
+  uploadAttachment: args => call('botAttachmentUpload', args),
+  removeAttachment: handle => call('botAttachmentRemove', {handle}),
+  cancelAttachment: requestId => call('botAttachmentCancel', {requestId}),
+  forgetAttachmentReceipt: args => call('botAttachmentForgetReceipt', args),
+  openContent: async args => {
+    const value = await call('contentOpen', args);
+    if (value?.opened === false && value.reason) throw Error(value.reason);
+    return value;
+  },
   voice: () => call('voice'),
-  browser: (state) => call('browser', state).catch(() => {}),
   dshWeb: (state) => call('dshWeb', state).catch(() => {}),
   ready: () => (A ? call('ready').catch(() => {}) : Promise.resolve()),
 };
@@ -138,3 +173,23 @@ export function ws(target, path, { onOpen, onMessage, onClose }) {
   s.onclose = (e) => onClose && onClose(e.code, e.reason);
   return { send: (t) => s.readyState === 1 && s.send(t), close: () => s.close() };
 }
+
+// Foreground subscription. Hiding/unloading a plugin releases its notification feed.
+native.watchNotifications = (packages, onEvent, {onError = () => {}, signal} = {}) => {
+  let stopped=false, subscriptionId=null, timer=null;
+  const report=error=>{try{onError(error);}catch(e){console.error(e);}};
+  const stop=()=>{if(stopped)return;stopped=true;clearTimeout(timer);window.removeEventListener('pd-plugin-hidden',stop);signal?.removeEventListener('abort',stop);if(subscriptionId)native.notifications({op:'unsubscribe',subscriptionId}).catch(()=>{});};
+  const poll=async()=>{
+    if(stopped)return;
+    try {
+      if(!subscriptionId)subscriptionId=(await native.notifications({op:'subscribe',packages})).subscriptionId;
+      const result=await native.notifications({op:'poll',subscriptionId});
+      if(!stopped)for(const event of result.events||[])try{onEvent(event);}catch(error){report(error);}
+      if(result.gap&&!stopped)report(Object.assign(new Error('通知事件有缺口，请刷新当前通知'),{code:'event_gap'}));
+    }catch(error){subscriptionId=null;if(!stopped){report(error);try{const status=await native.notifications({op:'status'});if(!status.enabled)stop();}catch{}}}
+    if(!stopped)timer=setTimeout(poll,2000);
+  };
+  window.addEventListener('pd-plugin-hidden',stop);signal?.addEventListener('abort',stop,{once:true});
+  if(signal?.aborted)stop();else poll();
+  return {stop};
+};

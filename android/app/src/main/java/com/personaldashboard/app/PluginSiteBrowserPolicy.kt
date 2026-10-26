@@ -18,6 +18,10 @@ object PluginSiteBrowserPolicy {
     const val MAX_FILENAME_CHARS = 120
     const val MAX_DOWNLOAD_BYTES = 256L * 1024 * 1024
     const val PREVIEW_REFUSAL = "预览不允许打开站内浏览器"
+    const val CORE_PROFILE_NAME = "ygxcorebrowser1"
+    const val DOCUMENT_PROFILE_NAME = "ygxdocumentbrowser1"
+    const val DOCUMENT_HOST = "dshfile.pd.local"
+    const val DOCUMENT_HANDOFF_URL = "openCoreUrl"
     private const val PROFILE_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
     private const val DOWNLOAD_LIMIT_MESSAGE = "下载超过 256 MiB 上限"
 
@@ -65,6 +69,56 @@ object PluginSiteBrowserPolicy {
         return url(args.getString("url"))
     }
 
+    /** Core accepts an optional display title, but never gesture claims or document URLs. */
+    fun openCoreRequest(args: JSONObject): String {
+        require(args.has("url") && args.keys().asSequence().all { it == "url" || it == "title" }) {
+            "Core 浏览器只接受 url 和 title"
+        }
+        return coreUrl(args.getString("url"))
+    }
+
+    /** The reserved document origin is never an ordinary Core browser target. */
+    fun coreUrl(raw: String?): String {
+        val value = url(raw)
+        require(!isDocumentOrigin(value)) { "受控文档地址不能作为普通网页打开" }
+        return value
+    }
+
+    /** Initial documents must name a path below the controlled local origin. */
+    fun documentInitialUrl(raw: String?): String {
+        val value = documentResourceUrl(raw)
+        require(URI(value).rawPath.orEmpty().length > 1) { "文档地址必须包含文件路径" }
+        return value
+    }
+
+    /** Controlled files always pass through the native resource provider. */
+    fun documentResourceUrl(raw: String?): String {
+        val value = url(raw)
+        require(isDocumentOrigin(value)) { "文档资源仅限受控同源地址" }
+        return value
+    }
+
+    /** HTML reports may load ordinary CDN resources; these never enter the file provider. */
+    fun documentNetworkResource(raw: String?, isMainFrame: Boolean): Boolean =
+        !isMainFrame && runCatching { !isDocumentOrigin(url(raw)) }.getOrDefault(false)
+
+    /**
+     * Only a real main-frame GET gesture can leave a document. The host returns this target to its
+     * native caller instead of loading an external page with document resource access.
+     */
+    fun documentHandoffUrl(
+        raw: String?,
+        isMainFrame: Boolean,
+        hasGesture: Boolean,
+        method: String,
+    ): String? {
+        val value = url(raw)
+        if (isDocumentOrigin(value) || !isMainFrame || !hasGesture || !method.equals("GET", true)) {
+            return null
+        }
+        return value
+    }
+
     /**
      * Profile names are injective, revision-independent, alphanumeric, and at most 53 characters.
      * Base-37 input plus the original length preserves distinction between leading hyphens and 0s.
@@ -105,6 +159,21 @@ object PluginSiteBrowserPolicy {
             .put("opened", opened)
             .put("closed", true)
             .put("finalUrl", finalUrl)
+
+    /** A document close can explicitly ask its native caller to continue in a Core browser. */
+    fun documentHandoffReceipt(
+        opened: Boolean,
+        finalUrl: String,
+        externalUrl: String,
+    ): JSONObject =
+        closeReceipt(opened, finalUrl).put(DOCUMENT_HANDOFF_URL, coreUrl(externalUrl))
+
+    private fun isDocumentOrigin(value: String): Boolean {
+        val uri = URI(value)
+        return uri.scheme.equals("https", true) &&
+            uri.host.equals(DOCUMENT_HOST, true) &&
+            uri.port == -1
+    }
 
     /**
      * Derive a bounded MediaStore display name. Path components, control characters, and header

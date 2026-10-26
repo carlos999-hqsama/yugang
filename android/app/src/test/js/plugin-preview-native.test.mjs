@@ -18,6 +18,7 @@ async function loadNative(t, {preview = true} = {}) {
     call(method, id, argsJson) { calls.push({method, id, args:JSON.parse(argsJson)}); },
     ...(preview ? {isPreview:() => true} : {}),
   }};
+  const lifecycle=new EventTarget();window.addEventListener=lifecycle.addEventListener.bind(lifecycle);window.removeEventListener=lifecycle.removeEventListener.bind(lifecycle);window.dispatchEvent=lifecycle.dispatchEvent.bind(lifecycle);
   globalThis.window = window;
   t.after(() => { if (globalThis.window === window) delete globalThis.window; });
   const module = await import(pathToFileURL(join(directory, 'native.js')).href);

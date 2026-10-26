@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadModule} from '../interaction-tests/loader.mjs';
+import {loadModule,synthetic} from '../interaction-tests/loader.mjs';
 import {createDocument} from '../interaction-tests/dom.mjs';
 const {ns}=await loadModule('bot-list.js');
 const bot=(id,name,pinned=false,sessionIds=[],avatar='circle')=>({id,name,pinned,sessionIds,avatar});
@@ -62,7 +62,8 @@ test('current task does not inherit prior-turn todos or artifacts',()=>{
  assert.equal(s.steps.length,1);assert.equal(s.steps[0].text,'本轮读取');assert.equal(s.steps[0].state,'running');assert.equal(s.status,'运行中');
 });
 
-const {ns:settings}=await loadModule('bot-settings.js');
+const settingsMenus=[];
+const {ns:settings}=await loadModule('bot-settings.js',{globals:{document:createDocument()},stubs:{'./ui.js':context=>synthetic(context,{menu:(_anchor,items)=>settingsMenus.push(items),toast:()=>{}})}});
 const toolConfig=()=>({instructions:'写作职责',memory:'kept memory',enabledTools:['files','web'],workspace:'/BOT/x',compactionThreshold:.67});
 test('Bot设置提供十二种形状和真实可持久化的上下文阈值控制',()=>{
  const html=settings.botSettingsHtml(toolConfig(),{id:'11111111-1111-4111-8111-111111111111',name:'写作',avatar:'diamond',pinned:false},{canCompact:true});
@@ -79,21 +80,26 @@ test('Bot设置提供十二种形状和真实可持久化的上下文阈值控�
  assert.equal(slider.getAttribute('value'),'67');assert.equal(doc.querySelector('[data-compaction-output]').textContent,'67%');
  assert.equal(settings.botCompactionPercent(undefined),80);
  assert.ok(html.includes('实际整理可能更早发生'));
- assert.ok(html.includes('工作区文件归档')&&html.includes('原始会话数据'));
+ assert.ok(doc.querySelector('.bot-settings-profile [data-bot-avatar-preview]'));
+ assert.ok(doc.querySelector('[data-bot-rename]'));
  assert.doesNotMatch(html,/data-history-session|bot-preview|阈值.*<input|<input[^>]+threshold/i);
 });
 test('受保护身份不能删除，保存仍传回原有记忆且不暴露历史会话',()=>{
  const html=settings.botSettingsHtml(toolConfig(),{id:'default',name:'主 Bot',avatar:'circle',pinned:true});
- const doc=createDocument();doc.body.innerHTML=html;
- assert.equal(doc.querySelector('[data-bot-delete]').disabled,true);
- assert.ok(html.includes('不能删除'));
+ const doc=createDocument();doc.body.innerHTML=`<div class="pane"><button data-bot-actions></button>${html}</div>`;
+ settings.bindBotSettings(doc.querySelector('.bot-settings'),toolConfig(),{id:'default',name:'主 Bot',pinned:true},{});
+ doc.querySelector('[data-bot-actions]').click();
+ assert.deepEqual(Array.from(settingsMenus.at(-1),item=>item.label),['取消置顶']);
+ assert.equal(doc.querySelector('[data-bot-delete]'),null);
+ assert.ok(settings.PROTECTED_BOT_IDS.has('00000000-0000-4000-8000-000000000001'));
+ assert.deepEqual(Object.keys(settings.BOT_TOOL_LABELS),['files','shell','web','skills','plugins','memory','app-management','conversation-history']);
  assert.ok(!html.includes('data-bot-memory'));
 });
 test('设置保存收集名称头像职责和工具，删除需要两次明确点击',async()=>{
  const html=settings.botSettingsHtml(toolConfig(),{id:'11111111-1111-4111-8111-111111111111',name:'写作',avatar:'circle',pinned:false},{canCompact:true});
- const doc=createDocument();doc.body.innerHTML=html;
+ const doc=createDocument();doc.body.innerHTML=`<div class="pane"><button data-bot-actions></button>${html}</div>`;
  const saved=[];let deleted=0;
- settings.bindBotSettings(doc.body,toolConfig(),{id:'11111111-1111-4111-8111-111111111111',name:'写作',avatar:'circle',pinned:false},{
+ settings.bindBotSettings(doc.querySelector('.bot-settings'),toolConfig(),{id:'11111111-1111-4111-8111-111111111111',name:'写作',avatar:'circle',pinned:false},{
    save:async value=>saved.push(value),
    deleteBot:async()=>{deleted++}
  });
@@ -106,12 +112,38 @@ test('设置保存收集名称头像职责和工具，删除需要两次明确�
  await new Promise(resolve=>setTimeout(resolve,0));
  assert.equal(JSON.stringify(saved),JSON.stringify([{name:'写作 Bot',avatar:'circle',fish:'goldfish',color:'ink',instructions:'更新职责',enabledTools:['files'],compactionThreshold:.75,memory:'kept memory'}]));
 
- doc.querySelector('[data-bot-delete]').click();
+ doc.querySelector('[data-bot-actions]').click();
+ await settingsMenus.at(-1).find(item=>item.label==='删除 Bot').act();
  assert.equal(deleted,0);
- assert.equal(doc.querySelector('[data-bot-delete]').textContent,'确认删除');
- doc.querySelector('[data-bot-delete]').click();
+ assert.equal(settingsMenus.at(-1).find(item=>item.label==='确认删除 Bot')?.danger,true);
+ await settingsMenus.at(-1).find(item=>item.label==='确认删除 Bot').act();
  await new Promise(resolve=>setTimeout(resolve,0));
  assert.equal(deleted,1);
+});
+test('Bot名称点开内联修改，回车结束并保存新名称',async()=>{
+ const html=settings.botSettingsHtml(toolConfig(),{id:'11111111-1111-4111-8111-111111111111',name:'写作',avatar:'circle',pinned:false});
+ const doc=createDocument();doc.body.innerHTML=html;
+ const saved=[];settings.bindBotSettings(doc.body,toolConfig(),{id:'11111111-1111-4111-8111-111111111111',name:'写作',avatar:'circle',pinned:false},{save:async value=>saved.push(value)});
+ const rename=doc.querySelector('[data-bot-rename]'),input=doc.querySelector('[data-bot-name]');
+ rename.click();
+ assert.equal(rename.hidden,true);assert.equal(input.hidden,false);assert.equal(doc.activeElement,input);
+ input.value=' 写作助手 ';
+ input.dispatchEvent('keydown',{key:'Enter',target:input,preventDefault(){}});
+ input.dispatchEvent('blur',{target:input});
+ assert.equal(input.hidden,true);assert.equal(rename.hidden,false);
+ assert.equal(doc.querySelector('[data-bot-name-label]').textContent,'写作助手');
+ doc.querySelector('[data-save-bot]').click();
+ await new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal(saved.at(-1).name,'写作助手');
+});
+test('Bot操作菜单可连续打开，不受上一次点击或双击防护影响',()=>{
+ const html=settings.botSettingsHtml(toolConfig(),{id:'11111111-1111-4111-8111-111111111111',name:'写作',avatar:'circle',pinned:false});
+ const doc=createDocument();doc.body.innerHTML=`<div class="pane"><button data-bot-actions></button>${html}</div>`;
+ settings.bindBotSettings(doc.querySelector('.bot-settings'),toolConfig(),{id:'11111111-1111-4111-8111-111111111111',name:'写作',pinned:false},{});
+ const menusBefore=settingsMenus.length;
+ for(let i=0;i<3;i++)doc.querySelector('[data-bot-actions]').click();
+ assert.equal(settingsMenus.length-menusBefore,3);
+ for(const items of settingsMenus.slice(-3))assert.deepEqual(Array.from(items,item=>item.label),['置顶','删除 Bot']);
 });
 test('创建表单提供十二种形状并返回所选身份',async()=>{
  const doc=createDocument();let mounted=null,closed=0;

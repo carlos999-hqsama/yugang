@@ -101,6 +101,7 @@ TEXT_SUFFIXES = {
     ".js",
     ".css",
     ".kt",
+    ".java",
     ".kts",
     ".gradle",
     ".xml",
@@ -145,6 +146,7 @@ ADMITTED_BINARIES = {
     Path("android/app/src/main/assets/www/img/fish-atlas.png"),
     Path("android/app/src/main/res/drawable-nodpi/launcher_whale.png"),
     Path("android/app/src/main/res/drawable-nodpi/notification_whale.png"),
+    Path("android/app/src/androidTest/assets/foundation-video.mp4"),
     Path("scripts/release/native-inputs/packages/proot_5.1.107.98_aarch64.deb"),
     Path("scripts/release/native-inputs/packages/libtalloc_2.5.0_aarch64.deb"),
     Path("scripts/release/native-inputs/packages/libandroid-shmem_0.7_aarch64.deb"),
@@ -158,6 +160,8 @@ ADMITTED_BINARIES = {
 REQUIRED_TEST_FIXTURES = {
     Path("android/app/src/test/java/com/personaldashboard/app/BotWorkspaceStoreTest.kt"):
         Path("android/app/src/test/resources/bot-persona-retired.md"),
+    Path("android/app/src/androidTest/java/com/personaldashboard/app/PluginFoundationDeviceChecks.kt"):
+        Path("android/app/src/androidTest/assets/foundation-video.mp4"),
 }
 PUBLIC_TEST_FIXTURES = set(REQUIRED_TEST_FIXTURES.values())
 

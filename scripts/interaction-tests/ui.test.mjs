@@ -111,3 +111,18 @@ test('弹层内 Tab 不会跑到弹层外面', async () => {
   key(last, 'Tab');
   assert.equal(doc.activeElement, first, '在最后一个可聚焦元素上按 Tab 应回到第一个');
 });
+
+test('弹层内打开菜单时，Escape 由菜单处理且不连带关闭弹层', async () => {
+  const { ns, doc } = await boot();
+  const anchor = new El('button', doc);
+  const pane = ns.sheet({ title: '弹层', body: '<button type="button" id="inside">弹层按钮</button>' });
+  pane.appendChild(anchor);
+  anchor.focus();
+  ns.menu(anchor, [{ label: '第一项', act: () => {} }, { label: '第二项', act: () => {} }]);
+  const menu = doc.getElementById('menu');
+  const item = menu.querySelector('.mi');
+  key(item, 'Escape');
+  assert.equal(menu.classList.contains('on'), false, '菜单应处理 Escape');
+  assert.equal(ns.sheetOpen(), true, '弹层不能被菜单的 Escape 连带关闭');
+  assert.equal(doc.activeElement, anchor, '菜单关闭后焦点回到弹层内触发控件');
+});

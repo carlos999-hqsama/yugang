@@ -17,9 +17,12 @@ window.__pd_cb = (id, json) => {
   const request = pending.get(id);
   if (!request) return;
   pending.delete(id);
-  const value = typeof json === 'string' ? JSON.parse(json) : json;
-  if (value && value.error) request.reject(Object.assign(new Error(value.error), value));
-  else request.resolve(value ? value.value : undefined);
+  clearTimeout(request.timer);
+  try {
+    const value = typeof json === 'string' ? JSON.parse(json) : json;
+    if (value && value.error) request.reject(Object.assign(new Error(value.error), value));
+    else request.resolve(value ? value.value : undefined);
+  } catch { request.reject(Object.assign(new Error('宿主返回了无效结果'),{code:'invalid_response'})); }
 };
 
 window.__pd_ev = (channel, json) => {
@@ -37,12 +40,26 @@ export function on(channel, fn) {
 
 function call(method, args = {}) {
   if (!bridge) return Promise.reject(new Error('PDNative 协议不可用'));
+  if (pending.size >= 64) return Promise.reject(Object.assign(new Error('页面调用过多，请稍后重试'),{code:'busy'}));
   return new Promise((resolve, reject) => {
     const id = `c${++sequence}`;
-    pending.set(id, {resolve, reject});
-    bridge.call(method, id, JSON.stringify(args));
+    const interactive = method === 'siteBrowserOpen' || method === 'voice' || (method === 'hostCall' && ['pick','create','directory','send','request','configure','authorize','camera','calendar','contact','location','pair','unpair','connect'].includes(args.arguments?.op));
+    const timer = interactive ? null : setTimeout(() => {
+      if (!pending.delete(id)) return;
+      if (method === 'hostCall') try { bridge.call('hostCancel', `cancel-${id}`, JSON.stringify({requestId:id})); } catch {}
+      reject(Object.assign(new Error('宿主调用超时'),{code:'timeout',timeout:true}));
+    },90000);
+    pending.set(id, {resolve, reject,timer});
+    try { bridge.call(method, id, JSON.stringify(args)); }
+    catch (error) { pending.delete(id);clearTimeout(timer);reject(error); }
   });
 }
+function releasePendingCalls() {
+  for (const request of pending.values()) {clearTimeout(request.timer);request.reject(Object.assign(new Error('页面已关闭'),{code:'cancelled',cancelled:true}));}
+  pending.clear();
+}
+window.addEventListener('pagehide',releasePendingCalls);
+window.addEventListener('pd-plugin-dispose',releasePendingCalls);
 
 export const isAndroid = !!bridge;
 export const FILE_BASE = bridge ? 'https://dshfile.pd.local' : 'https://dshfile.pd.local';
@@ -62,6 +79,16 @@ function previewBrowserResult(error) {
 }
 
 export const native = {
+  capabilities: () => call('hostCapabilities'),
+  host: (capability, arguments_ = {}) => call('hostCall',{capability,arguments:arguments_}),
+  files: request => call('hostCall',{capability:'plugin.files',arguments:request}),
+  transfer: request => call('hostCall',{capability:'plugin.transfer',arguments:request}),
+  notifications: (request = {op:'status'}) => call('hostCall',{capability:'plugin.notifications.read',arguments:request}),
+  share: request => call('hostCall',{capability:'plugin.share',arguments:request}),
+  connections: request => call('hostCall',{capability:'plugin.connection',arguments:request}),
+  system: request => call('hostCall',{capability:'plugin.system',arguments:request}),
+  browserSnapshot: () => call('hostCall',{capability:'plugin.browser',arguments:{op:'snapshot'}}),
+
   isPreview,
   call,
   getConfig: () => call('getConfig'),
@@ -310,3 +337,23 @@ function subscribeVoice(request={}) {
   const ready=call('pluginVoice',{op:'subscribe',requestId}).then(r=>{subscription=r;if(!cancelled)poll();return r;},error=>{const wasCancelled=cancelled;stop();if(!wasCancelled)request.onError?.({error:error.message});throw error;});
   return {ready,cancel:stop};
 }
+
+// Foreground subscription. Hiding/unloading a plugin releases its notification feed.
+native.watchNotifications = (packages, onEvent, {onError = () => {}, signal} = {}) => {
+  let stopped=false, subscriptionId=null, timer=null;
+  const report=error=>{try{onError(error);}catch(e){console.error(e);}};
+  const stop=()=>{if(stopped)return;stopped=true;clearTimeout(timer);window.removeEventListener('pd-plugin-hidden',stop);signal?.removeEventListener('abort',stop);if(subscriptionId)native.notifications({op:'unsubscribe',subscriptionId}).catch(()=>{});};
+  const poll=async()=>{
+    if(stopped)return;
+    try {
+      if(!subscriptionId)subscriptionId=(await native.notifications({op:'subscribe',packages})).subscriptionId;
+      const result=await native.notifications({op:'poll',subscriptionId});
+      if(!stopped)for(const event of result.events||[])try{onEvent(event);}catch(error){report(error);}
+      if(result.gap&&!stopped)report(Object.assign(new Error('通知事件有缺口，请刷新当前通知'),{code:'event_gap'}));
+    }catch(error){subscriptionId=null;if(!stopped){report(error);try{const status=await native.notifications({op:'status'});if(!status.enabled)stop();}catch{}}}
+    if(!stopped)timer=setTimeout(poll,2000);
+  };
+  window.addEventListener('pd-plugin-hidden',stop);signal?.addEventListener('abort',stop,{once:true});
+  if(signal?.aborted)stop();else poll();
+  return {stop};
+};

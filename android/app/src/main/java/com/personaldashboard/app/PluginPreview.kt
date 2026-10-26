@@ -189,6 +189,12 @@ class PluginPreview(
 
         @JavascriptInterface
         fun call(method: String, id: String, argsJson: String?) {
+            if(method=="hostCapabilities"){
+                val description=PluginCapabilities.describe(previewCapabilities,false).put("preview",true)
+                val services=description.getJSONArray("operations")
+                for(i in 0 until services.length()){val operations=services.getJSONObject(i).optJSONArray("operations")?:continue;for(j in 0 until operations.length())operations.getJSONObject(j).put("available",false).put("reason","preview")}
+                reply(id,JSONObject().put("value",description));return
+            }
             val args =
                 try {
                     PluginBridgeArguments.parse(argsJson)

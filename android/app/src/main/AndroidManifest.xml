@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.RUN_USER_INITIATED_JOBS" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Network state is required for the local conversation runtime and plugin networking. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 内置 Harness 运行时的前台服务（后台/锁屏时 dsh 继续运行） -->
@@ -32,6 +41,16 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PD">
 
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.plugin-files" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/plugin_file_paths" />
+        </provider>
+        <service android:name=".PluginNotificationListener" android:label="鱼缸通知读取" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
+        <service android:name=".PluginTransferJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
+        <receiver android:name=".PluginHostBootReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        </receiver>
         <service android:name=".PluginBackgroundJob"
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false" />
@@ -46,6 +65,14 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" /><action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" /><data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${applicationId}.oauth" android:host="callback" />
             </intent-filter>
             <!-- DSHBox「用外部浏览器打开」会发出 http://127.0.0.1:3080/?token=… 的 VIEW，
                  在选择框里选本应用即可完成配对（只接受回环地址）。 -->

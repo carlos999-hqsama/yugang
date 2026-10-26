@@ -65,15 +65,16 @@ class Bridge(
     private val pluginServiceHandler: ((String, JSONObject, PluginCancellation) -> JSONObject)? =
         null,
 ) {
-    private val io = Executors.newCachedThreadPool()
+    private val io = PluginBridgeExecutor()
     private val voiceFrames = Executors.newSingleThreadExecutor()
+    private val hostCalls=java.util.concurrent.ConcurrentHashMap<String,PluginCancellation>()
     private val serviceCancellation = PluginCancellation()
     private val streamOwner = "page:" + java.util.UUID.randomUUID()
     private val browserOwner = java.util.UUID.randomUUID().toString()
     @Volatile private var pageStreams = PluginCancellation()
     private val detachServiceStreams = serviceCancellation.onCancel { pageStreams.cancel() }
     @Volatile private var closed = false
-    private val filePreviews = FilePreviewDialog(act)
+    private val filePreviews = FilePreviewDialog(act, pluginIdentity)
     private val bots by lazy { BotWorkspaces.get(act) }
 
     @JavascriptInterface
@@ -86,6 +87,7 @@ class Bridge(
         } catch (_: Exception) {
             return
         }
+        if(method=="hostCall"&&(argsJson?.length?:0)>384*1024){replyTo(id,JSONObject().put("error","通用能力参数过大").put("code","invalid_arguments"));return}
         val a =
             try {
                 PluginBridgeArguments.parse(argsJson)
@@ -93,6 +95,89 @@ class Bridge(
                 rejectInvalidArguments(method, id)
                 return
             }
+        if(method=="notificationAccess"){
+            act.runOnUiThread{try{gate();check(act.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED));val identity=pluginIdentity
+                if(identity!=null){check(pluginPageVisible());PluginHostServices.requireCurrent(act,identity.first,identity.second,"plugin.notifications.read")}else check(trustedAgentVoiceSource)
+                PluginNotificationInbox.settings(act);replyTo(id,JSONObject().put("value",JSONObject().put("opened",true)))
+            }catch(_:Exception){replyTo(id,JSONObject().put("error","请在前台打开通知使用权设置").put("code","foreground_required"))}}
+            return
+        }
+        if (method == "hostCancel") {
+            hostCalls[a.optString("requestId")]?.cancel()
+            replyTo(id,JSONObject().put("value",true));return
+        }
+        if (method == "hostCapabilities") {
+            try { io.execute {
+                try { gate();val identity=pluginIdentity
+                    val result=if(identity==null)PluginCapabilities.describe(PluginContract.capabilities,true).put("diagnostics",PluginCallAdmission.diagnostics()).put("storage",PluginPlatform.store(act).recoveryStatus())
+                        else PluginHostServices.discovery(act,identity.first,identity.second,true)
+                    replyTo(id,JSONObject().put("value",result))
+                }catch(_:Exception){replyTo(id,JSONObject().put("error","能力目录暂不可用").put("code","unavailable"))}
+            }}catch(_:Exception){replyTo(id,JSONObject().put("error","宿主调用繁忙").put("code","busy"))};return
+        }
+        if (method == "hostCall") {
+            val identity=pluginIdentity
+            if(identity==null){replyTo(id,JSONObject().put("error","通用能力调用需要已安装插件身份").put("code","identity_required"));return}
+            val token=PluginCancellation();val detach=serviceCancellation.onCancel{token.cancel()}
+            hostCalls[id]=token;val answered=java.util.concurrent.atomic.AtomicBoolean(false)
+            fun finish(value:JSONObject){if(!answered.compareAndSet(false,true))return;hostCalls.remove(id,token);detach();token.cancel();if(!closed)replyTo(id,value)}
+            try{
+                val capability=a.getString("capability");val arguments=a.optJSONObject("arguments")?:JSONObject()
+                require(arguments.toString().toByteArray().size<=PluginCapabilities.MAX_ARGUMENT_BYTES){"通用能力参数过大"}
+                val spec=PluginCapabilities.operation(capability,arguments.getString("op"),true)
+                PluginHostServices.requireCurrent(act,identity.first,identity.second,capability)
+                if(arguments.getString("op") in spec.foreground){
+                    act.runOnUiThread{try{gate();token.check();check(pluginPageVisible()&&act.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)){"此操作需要可见的前台插件页面"}
+                        act.hostUi.execute(identity.first,identity.second,capability,arguments,token){value->finish(if(value.has("error"))value else JSONObject().put("value",value))}
+                    }catch(_:Exception){finish(JSONObject().put("error","系统交互未打开，请回到插件页面重试").put("code","foreground_required"))}}
+                }else{
+                    val userInitiated=capability=="plugin.transfer"&&arguments.optString("op") in setOf("download","upload","resume")&&pluginPageVisible()&&browserGesture()
+                    io.execute{try{gate();val value=PluginHostServices.call(act,identity.first,identity.second,capability,arguments,token,page=true,userInitiated=userInitiated);finish(JSONObject().put("value",value))}
+                        catch(e:Exception){finish(if(e is PluginRequestException)e.payload() else JSONObject().put("error",e.message?:"能力调用失败").put("code","host_error"))}}
+                }
+            }catch(e:Exception){finish(JSONObject().put("error",e.message?:"能力调用失败").put("code",if(e is java.util.concurrent.RejectedExecutionException)"busy" else "invalid_request"))}
+            return
+        }
+        if (method == "contentOpen" || method == "botAttachmentPick") {
+            if (!trustedAgentVoiceSource || pluginIdentity != null) {
+                replyTo(id, JSONObject().put("error", "此接口只供核心对话使用"));return
+            }
+            val token = PluginCancellation()
+            val detach = serviceCancellation.onCancel { token.cancel() }
+            val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+            fun finish(result: JSONObject) {
+                if (!answered.compareAndSet(false, true)) return
+                detach();token.cancel()
+                if (!closed) replyTo(id, result)
+            }
+            try {
+                if (method == "contentOpen") io.execute {
+                    try {
+                        token.check();gate()
+                        ChatContent(act, net).open(browserOwner, a, token) { value -> finish(JSONObject().put("value", value)) }
+                    } catch (error: Exception) { finish(JSONObject().put("error", error.message ?: "内容未打开")) }
+                } else act.runOnUiThread {
+                    try {
+                        token.check();gate()
+                        act.chooseBotFiles { uris ->
+                            try {
+                                io.execute {
+                                    try {
+                                        token.check()
+                                        val selected = if (uris.isEmpty()) org.json.JSONArray() else act.botAttachments.stage(uris)
+                                        if (closed || token.cancelled) {
+                                            for (index in 0 until selected.length()) act.botAttachments.remove(selected.getJSONObject(index).getString("handle"))
+                                            finish(JSONObject().put("error", "页面已关闭"))
+                                        } else finish(JSONObject().put("value", selected))
+                                    } catch (error: Exception) { finish(JSONObject().put("error", error.message ?: "文件读取失败")) }
+                                }
+                            } catch (_: java.util.concurrent.RejectedExecutionException) { finish(JSONObject().put("error", "页面已关闭")) }
+                        }
+                    } catch (error: Exception) { finish(JSONObject().put("error", error.message ?: "无法选择文件")) }
+                }
+            } catch (error: Exception) { finish(JSONObject().put("error", error.message ?: "页面已关闭")) }
+            return
+        }
         if (method == "pluginNotify" && a.optString("op") == "request") {
             val identity = pluginIdentity
             if (identity == null) { replyTo(id, JSONObject().put("error", "通知权限申请仅供已安装的前台插件页面使用"));return }
@@ -233,7 +318,6 @@ class Bridge(
                     "openExternal",
                     "openDshbox",
                     "voice",
-                    "browser",
                     "dshWeb",
                     "ready",
                     "dshUnpair",
@@ -252,15 +336,20 @@ class Bridge(
                     replyTo(
                         id,
                         if (e is PluginRequestException) e.payload()
+                        else if (e is BotAttachmentException) e.payload()
                         else JSONObject().put("error", e.message ?: e.javaClass.simpleName),
                     )
                 }
             }
         }
-        if (ui) act.runOnUiThread(task) else io.execute(task)
+        if (ui) act.runOnUiThread(task) else try { io.execute(task) }
+        catch (_: java.util.concurrent.RejectedExecutionException) {
+            if(!closed)replyTo(id,JSONObject().put("error","宿主调用繁忙，请稍后重试").put("code","busy").put("retryable",true))
+        }
     }
 
     fun close() {
+        pluginIdentity?.let {PluginBluetooth.release(it.first)}
         closed = true
         serviceCancellation.cancel()
         filePreviews.close()
@@ -272,6 +361,7 @@ class Bridge(
 
     /** Hidden pages cannot retain network streams; resume installs a fresh stream boundary. */
     fun pause() {
+        pluginIdentity?.let {PluginBluetooth.release(it.first)}
         pageStreams.cancel()
     }
 
@@ -335,9 +425,11 @@ class Bridge(
             }
             "plugins" -> {
                 val identity = pluginIdentity
-                if (a.optString("action") == "fetch" && identity != null)
-                    PluginPlatform.pageFetch(act, identity.first, identity.second, a, serviceCancellation)
-                else PluginPlatform.manage(act, a, serviceCancellation)
+                when(a.optString("action")){
+                    "fetch" -> if(identity!=null)PluginPlatform.pageFetch(act,identity.first,identity.second,a,serviceCancellation,browserOwner) else PluginFetch.fetch(a,serviceCancellation,scope="core:$browserOwner")
+                    "fetchCancel" -> if(identity!=null)PluginPlatform.cancelPageFetch(act,identity.first,identity.second,a.optString("requestId"),browserOwner) else JSONObject().put("cancelled",PluginFetch.cancel(a.optString("requestId"),"core:$browserOwner"))
+                    else -> PluginPlatform.manage(act,a,serviceCancellation)
+                }
             }
             "pluginVoice" -> {
                 val identity = pluginIdentity ?: error("仅供可见插件页面使用")
@@ -418,6 +510,24 @@ class Bridge(
             }
             "openFile" -> DownloadedFiles.open(act, a)
             "bots" -> bots.call(a)
+            "botAttachmentUpload" -> {
+                check(trustedAgentVoiceSource && pluginIdentity == null) { "此接口只供核心对话使用" }
+                act.botAttachments.upload(a, serviceCancellation) { progress -> if (!closed) act.emit("attachmentProgress", progress) }
+            }
+            "botAttachmentRemove" -> {
+                check(trustedAgentVoiceSource && pluginIdentity == null) { "此接口只供核心对话使用" }
+                act.botAttachments.remove(a.getString("handle"))
+            }
+            "botAttachmentCancel" -> {
+                check(trustedAgentVoiceSource && pluginIdentity == null) { "此接口只供核心对话使用" }
+                JSONObject().put("cancelled", act.botAttachments.cancel(a.getString("requestId")))
+            }
+            "botAttachmentForgetReceipt" -> {
+                check(trustedAgentVoiceSource && pluginIdentity == null) { "此接口只供核心对话使用" }
+                act.requireBotSession(a.getString("botId"), a.getString("sessionId"))
+                act.botAttachments.forgetReceipt(a.getString("handle"), a.getString("sessionId"))
+                true
+            }
             "http" -> {
                 if (
                     cfg.embedded &&
@@ -453,10 +563,6 @@ class Bridge(
             "openExternal" -> act.openExternal(a.optString("url"))
             "openDshbox" -> act.openDshbox()
             "voice" -> act.startVoice()
-            "browser" -> {
-                panes.browser(a)
-                true
-            }
             "dshWeb" -> {
                 panes.dshWeb(a)
                 true

@@ -123,6 +123,18 @@ class El {
     if (i >= 0) { this.childNodes.splice(i, 1); node.parentNode = null; }
     return node;
   }
+  replaceWith(node) {
+    const parent = this.parentNode;
+    if (!parent || node === this) return;
+    if (node.parentNode) node.parentNode.removeChild(node);
+    const index = parent.childNodes.indexOf(this);
+    parent.childNodes.splice(index, 1, node);
+    this.parentNode = null;
+    this.isConnected = false;
+    this.syncConnected();
+    node.parentNode = parent;
+    parent.syncConnected();
+  }
   remove() { if (this.parentNode && typeof this.parentNode.removeChild === 'function') this.parentNode.removeChild(this); }
   syncConnected() {
     for (const child of this.childNodes) {
@@ -208,7 +220,8 @@ function parseAttrs(el, source) {
   let m;
   while ((m = re.exec(source || ''))) {
     const value = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4] !== undefined ? m[4] : '';
-    el.setAttribute(m[1], value);
+    // HTML parses attribute entities before exposing href/dataset, just like real WebView.
+    el.setAttribute(m[1], value.replace(/&(amp|quot|apos|lt|gt|#39);/g, (_, entity) => ({amp:'&',quot:'"',apos:"'",lt:'<',gt:'>','#39':"'"}[entity])));
   }
 }
 

@@ -173,6 +173,10 @@ function notificationCard() {
         <div class="st-row-copy"><b>系统通知</b><small>显示运行状态，并提供停止或重启入口</small></div>
         <button type="button" class="st-row-action" data-act="backgroundNotifications" aria-label="打开系统通知设置"><span>${notificationsAllowed ? '已允许' : '去开启'}</span>${S.fwd}</button>
       </div>
+      <div class="st-row">
+        <div class="st-row-copy"><b>读取其他 App 的通知</b><small>仅在系统授权后，向已订阅的插件提供通知</small></div>
+        <button type="button" class="st-row-action" data-act="notificationAccess" aria-label="打开通知使用权设置"><span>管理</span>${S.fwd}</button>
+      </div>
       ` : ''}
     </div>
     <div class="st-subsection">
@@ -617,6 +621,8 @@ async function act(a) {
       startDsh(); render(); toast('已取消配对');
     } else if (a === 'rtRestart') {
       await retryRt(); toast('正在重启对话运行时');
+    } else if (a === 'notificationAccess') {
+      await native.call('notificationAccess');
     } else if (a === 'backgroundNotifications') {
       await native.backgroundSettings('notifications');
     } else if (a === 'backgroundBattery') {
@@ -642,7 +648,7 @@ async function act(a) {
       clearDraft(['ntfyUrl']);
       cfg = await native.getConfig(); render(); toast('链接已保存');
     } else if (a === 'openNtfy') {
-      if (cfg.ntfyUrl) await native.openExternal(cfg.ntfyUrl);
+      if (cfg.ntfyUrl) await native.openContent({url:cfg.ntfyUrl,title:"通知服务"});
 
     }
   } catch (e) {
