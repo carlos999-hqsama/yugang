@@ -43,6 +43,8 @@ node scripts/test-model-editor.mjs
 python3 -m unittest discover -s scripts/release-tests
 ```
 
+滚动回归包含原生滚动事件延迟到达、顶部负偏移回弹、短内容回弹、内容收缩后恢复，以及加载更早历史后保持消息身份和像素位置。`chat-scroll-tests` 验证共用控制器，`interaction-tests` 验证实际对话渲染与历史前插；它们不替代实体设备上的 WebView 手势验收。
+
 生成 `.rtbuild/dl/dsh` 后运行依赖真实 DSH 编译器的检查：
 
 ```sh

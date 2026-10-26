@@ -77,8 +77,8 @@ class FakeScrollBox {
   removeEventListener(type, fn) {
     this.listeners.get(type)?.delete(fn);
   }
-  dispatch(type) {
-    for (const fn of this.listeners.get(type) || []) fn({ type });
+  dispatch(type, event = {}) {
+    for (const fn of this.listeners.get(type) || []) fn({ type, ...event });
   }
   firstVisible() {
     const viewportTop = this.scrollTop;
@@ -331,4 +331,80 @@ test('距离底部仅20px的主动上滑也退出跟随',()=>{
  const top=box.scrollTop;
  controller.begin('a');box.append('c',200);controller.end({sid:'a',ready:true});
  assert.equal(box.scrollTop,top);assert.equal(controller.state.follow,false);
+});
+
+test('向下滚动的原生 scroll 事件尚未派发时，布局刷新保持当前阅读位置', () => {
+ const {box,controller}=setup('harness.js');
+ enterLoaded(controller,box,'a',Array.from({length:20},(_,i)=>({key:'a'+i,height:60})));
+ box.userScroll(0);
+ // The browser updates scrollTop before delivering its queued scroll event.
+ box.scrollTop=420;
+ const reading=box.firstVisible();
+ triggerResize();flushFrames();
+ assert.equal(box.scrollTop,420);
+ assert.deepEqual(box.firstVisible(),reading);
+ box.dispatch('scroll');
+ assert.equal(controller.state.follow,false);
+});
+
+
+test('顶部下拉越界（负 scrollTop）不写入锚点，前插完成仍锚定原消息',()=>{
+ const {box,controller}=setup('harness.js');
+ enterLoaded(controller,box,'a',Array.from({length:20},(_,i)=>({key:'m'+i,height:100})));
+ box.userScroll(0); // 到顶，锚定 m0
+ box.dispatch('touchstart',{touches:[{clientY:100}]});
+ box.dispatch('touchmove',{touches:[{clientY:180}]});
+ assert.equal(controller.state.follow,false,'下拉应暂停跟随');
+ // iOS 式橡皮筋越界：scrollTop 变负并派发原生事件
+ box.scrollTop=-60; box.dispatch('scroll');
+ assert.equal(controller.state.anchor.top,0,'越界负值不能写进锚点位置');
+ // 加载中的并发状态渲染
+ controller.begin('a'); controller.end({sid:'a',ready:true});
+ // 旧页前插完成
+ box.prepend([{key:'p0',height:120},{key:'p1',height:120}]);
+ controller.begin('a'); controller.end({sid:'a',ready:true,prepend:true});
+ assert.deepEqual(box.firstVisible(),{key:'m0',offset:0},'前插后仍锚定原首条消息');
+ assert.equal(box.scrollTop,240);
+ box.dispatch('touchend');
+});
+
+test('短内容下拉回弹的 0/0 滚动事件不重新打开跟随，后续新消息不把用户拽走',()=>{
+ const {box,controller}=setup('harness.js');
+ enterLoaded(controller,box,'a',[{key:'m0',height:150},{key:'m1',height:150}]); // 内容恰满一屏：maxTop=0
+ assert.equal(controller.state.follow,true);
+ box.dispatch('touchstart',{touches:[{clientY:100}]});
+ box.dispatch('touchmove',{touches:[{clientY:180}]});
+ assert.equal(controller.state.follow,false,'下拉已暂停跟随');
+ // 越界与回弹都产生 0/0 附近的原生事件；它们不含用户滚动意图
+ box.scrollTop=-40; box.dispatch('scroll');
+ box.scrollTop=0; box.dispatch('scroll');
+ assert.equal(controller.state.follow,false,'回弹事件不能重新打开跟随');
+ // 下拉触发的旧页前插完成：锚定原首条消息
+ box.prepend([{key:'p0',height:100},{key:'p1',height:100},{key:'p2',height:100},{key:'p3',height:100},{key:'p4',height:100}]);
+ controller.begin('a'); controller.end({sid:'a',ready:true,prepend:true});
+ assert.deepEqual(box.firstVisible(),{key:'m0',offset:0});
+ // 前插后又来新消息：用户在阅读旧内容，不能被拽到底部
+ box.append('n0',100);
+ controller.begin('a'); controller.end({sid:'a',ready:true});
+ assert.equal(box.firstVisible().key,'m0','阅读旧内容时新消息不能拽走');
+ assert.equal(controller.state.follow,false);
+});
+
+test('DOM 替换导致内容暂时塌缩时，钳位到 0 的原生事件不清空锚点，内容恢复后还原阅读位置',()=>{
+ const {box,controller}=setup('harness.js');
+ enterLoaded(controller,box,'a',Array.from({length:30},(_,i)=>({key:'m'+i,height:100})));
+ box.userScroll(1200);
+ assert.equal(controller.state.follow,false);
+ // DOM 被替换成临时短内容（如加载占位），浏览器布局时把 scrollTop 钳到 0 并异步派发事件
+ box.setLayout([{key:'x',height:200}]);
+ box.scrollTop=0; box.dispatch('scroll');
+ assert.equal(controller.state.follow,false,'塌缩钳位事件不代表用户意图，不能打开跟随');
+ assert.ok(controller.state.anchor,'塌缩期间锚点应保留');
+ // 完整内容随下一轮渲染恢复：应按原锚点还原，而不是停在顶部或底部
+ controller.begin('a');
+ box.setLayout(Array.from({length:30},(_,i)=>({key:'m'+i,height:100})));
+ controller.end({sid:'a',ready:true});
+ assert.equal(box.scrollTop,1200,'内容恢复后应还原到原阅读位置');
+ assert.equal(box.firstVisible().key,'m12');
+ assert.equal(controller.state.follow,false);
 });

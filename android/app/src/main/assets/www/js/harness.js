@@ -523,7 +523,8 @@ function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true }
     if (H.historyMore) html += `<button type="button" class="btn history-more" data-act="older" data-scroll-key="history-more"${H.historyBusy ? ' disabled' : ''}>${H.historyBusy ? '正在加载…' : '加载更早记录'}</button>`;
     const items = H.conv.build({ running: dsh.running.has(H.sel) });
     hasActivity = H.conv.hasLiveOutput?.() || items.some(it => it.k === 'working' || (it.k === 'process' && it.running));
-    const itemKey = (it, index) => it.key ? `i:${it.key}` : `${it.k}:${index}`;
+    // Event sequence and block index keep anchors stable when older history is prepended.
+    const itemKey = (it, index) => it.key ? `i:${it.key}` : (it.seq != null ? `${it.k}:${it.seq}${it.bi != null ? ':' + it.bi : ''}` : `${it.k}:${index}`);
     const renderItem = (it, index) => {
       const key = itemKey(it, index);
       let html = '';

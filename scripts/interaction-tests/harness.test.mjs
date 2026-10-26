@@ -156,8 +156,10 @@ function installChatLayout() {
   Object.defineProperty(El.prototype, 'getBoundingClientRect', { ...rect, value() {
     if (this.classList?.contains('msgs')) return { top: 0, left: 0, right: 600, bottom: 100, width: 600, height: 100 };
     const key = this.dataset?.scrollKey;
-    if (typeof key === 'string' && key.startsWith('text:')) {
-      const index = Number(key.slice(5)); const box = this.closest('.msgs'); const top = index * 100 - (box?.scrollTop || 0);
+    if (typeof key === 'string' && this.closest?.('.msgs')) {
+      const box = this.closest('.msgs');
+      const index = box.querySelectorAll('[data-scroll-key]').indexOf(this);
+      const top = index * 100 - (box?.scrollTop || 0);
       return { top, left: 0, right: 600, bottom: top + 40, width: 600, height: 40 };
     }
     return rect.value.call(this);
@@ -717,4 +719,36 @@ test('首段输出早于running元数据时立即替换发送等待条',async()=
  app.api.prompt=async()=>({accepted:true});const ta=app.root.querySelector('.input textarea');ta.value='先有输出';ta.dispatchEvent('input',{target:ta});sendBtn(app.root).dispatchEvent('click',{target:sendBtn(app.root)});await tick();
  follow({type:'assistant-stream',frame:{type:'start',attemptId:'early-output'}});follow({type:'assistant-stream',frame:{type:'chunk',attemptId:'early-output',chunk:{type:'text-delta',index:0,text:'已经开始核对。'}}});await tick();
  assert.match(app.root.querySelector('.mdw').textContent,/已经开始核对/);assert.equal(app.root.querySelector('.send-status'),null);
+});
+
+
+test('加载更早记录（前插）后保持原阅读锚点：同一消息 key 不变且像素补偿',async()=>{
+ const app=await boot({storage:{'pd.h.sel':'"sid-1"'}});
+ const records=Array.from({length:6},(_,i)=>({type:'event',event:{seq:i+1,type:'assistant/message',data:{message:{content:[{type:'text',text:`第${i+1}段`}]}}}}));
+ app.follows.at(-1).cb({type:'snapshot',header:{},hasMore:true,cursor:6,records});
+ await tick();
+ const restoreLayout=installChatLayout();
+ try{
+   const msgs=app.root.querySelector('.msgs');
+   const keyOf=text=>[...msgs.querySelectorAll('[data-scroll-key]')].find(n=>n.textContent.includes(text))?.dataset.scrollKey;
+   const before3=keyOf('第3段'),before5=keyOf('第5段');
+   assert.ok(before3&&before5,'应渲染出带滚动锚点的消息');
+   msgs.scrollTop=250;msgs.dispatchEvent('scroll',{target:msgs}); // 锚定第4段（index 3，offset 50）
+   app.api.page=async(sid,cursor,oldest)=>({hasMore:true,records:Array.from({length:5},(_,i)=>({type:'event',event:{seq:i-4,type:'assistant/message',data:{message:{content:[{type:'text',text:`上页${i+1}`}]}}}}))});
+   const btn=msgs.querySelector('[data-act="older"]');
+   assert.ok(btn,'有更早历史时应渲染加载入口');
+   btn.dispatchEvent('click',{target:btn});
+   await tick();
+   assert.equal(msgs.querySelectorAll('[data-scroll-key]').length,12,'前插 5 条后应有 12 个锚点（含加载按钮）');
+   assert.equal(msgs.scrollTop,750,'前插后应按高度差补偿，保持原阅读消息位置');
+   assert.equal(keyOf('第3段'),before3,'同一逻辑消息的锚点 key 不能因前插而改变');
+   assert.equal(keyOf('第5段'),before5);
+   // 顶部场景：用户拉到最顶端触发加载，也不能跳到新内容的顶部
+   msgs.scrollTop=0;msgs.dispatchEvent('scroll',{target:msgs});
+   app.api.page=async()=>({hasMore:false,records:[]}); // 无更多：不再前插
+   const top=msgs.scrollTop;
+   app.emit('sessions'); // 触发一次并发刷新渲染
+   await tick();
+   assert.equal(msgs.scrollTop,top,'无前插的并发渲染不能移动阅读位置');
+ }finally{restoreLayout();}
 });
