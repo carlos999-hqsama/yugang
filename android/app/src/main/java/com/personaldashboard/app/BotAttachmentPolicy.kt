@@ -196,4 +196,3 @@ internal object BotAttachmentPolicy {
         return raw
     }
 }
-

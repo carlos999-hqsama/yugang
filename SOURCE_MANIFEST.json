@@ -17,6 +17,7 @@
     "THIRD_PARTY_NOTICES.md",
     "android/app/build.gradle.kts",
     "android/app/proguard-rules.pro",
+    "android/app/src/androidTest/assets/foundation-video.mp4",
     "android/app/src/androidTest/java/com/personaldashboard/app/ConfigSecretIntegrityDeviceChecks.kt",
     "android/app/src/androidTest/java/com/personaldashboard/app/PluginBackgroundRegistryDeviceChecks.kt",
     "android/app/src/androidTest/java/com/personaldashboard/app/PluginCoreBootDeviceChecks.kt",
