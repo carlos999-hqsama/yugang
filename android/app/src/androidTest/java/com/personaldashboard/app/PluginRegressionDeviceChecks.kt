@@ -82,111 +82,35 @@ internal class PluginRegressionDeviceChecks(private val runner: Instrumentation)
     }
 
     private fun browserBoundary() {
-        val app=activity()
-        val isolated=object:android.content.ContextWrapper(context) {
-            override fun getSharedPreferences(name:String,mode:Int):android.content.SharedPreferences =
-                this@PluginRegressionDeviceChecks.context.getSharedPreferences("audit-browser-"+name,mode)
-        }
-        val cfg=Config(isolated)
-        val server=ServerSocket(0)
-        cfg.dshMode="external";cfg.dshUrl="http://127.0.0.1:${server.localPort}";cfg.dshCookie="SYNTHETIC_BROWSER_COOKIE"
-        val net=Net(cfg) {_,_->}
-        val fileRequests=AtomicInteger()
-        val privateRequests=AtomicInteger()
-        val unexpectedNavigations=AtomicInteger()
-        val slowStarted=CountDownLatch(1)
-        val slowRelease=CountDownLatch(1)
-        val fixture=Thread {
-            while(!server.isClosed) try {val accepted=server.accept();Thread {try {accepted.use {socket->
-                val reader=socket.getInputStream().bufferedReader();val request=reader.readLine().orEmpty()
-                val headers=mutableListOf<String>();while(true){val line=reader.readLine();if(line.isNullOrEmpty())break;headers+=line}
-                val local=request.contains("/api/file?")
-                if(local){check(headers.any {it.contains("SYNTHETIC_BROWSER_COOKIE")});fileRequests.incrementAndGet()}
-                val svg=request.contains("private.svg")
-                if(local && svg)privateRequests.incrementAndGet()
-                if(local && request.contains("unrequested.html"))unexpectedNavigations.incrementAndGet()
-                if(local && request.contains("slow.html")){slowStarted.countDown();check(slowRelease.await(5,TimeUnit.SECONDS))}
-                val body=if(local && svg) "<svg xmlns='http://www.w3.org/2000/svg' width='173' height='19'></svg>"
-                else if(local && request.contains("frames.html")) "<html><body><script>window.addEventListener('securitypolicyviolation',e=>{if(e.violatedDirective==='frame-src')window.blockedFrame=true})</script><iframe src='https://foreign.audit.invalid/frame'></iframe><iframe id='local' src='safe.html' onload='window.localFrame=this.contentDocument.querySelector(\"img\").naturalWidth'></iframe></body></html>"
-                else if(local) "<html><body><img src='private.svg' onload='window.observed=this.naturalWidth' onerror='window.observed=-1'></body></html>"
-                else if(request.contains("/race")) "<html><body><script>window.raceTicks=0;setInterval(()=>{window.raceTicks++;const i=new Image();i.src='https://dshfile.pd.local/private.svg?t='+window.raceTicks;},30)</script></body></html>"
-                else "<html><body><a id='go' href='mailto:manual@audit.invalid'>Open mail</a><img src='https://dshfile.pd.local/private.svg' onload='window.observed=this.naturalWidth' onerror='window.observed=-1'><script>setTimeout(()=>location.href='mailto:auto@audit.invalid',150)</script></body></html>"
-                val data=body.toByteArray();val type=if(local && svg)"image/svg+xml" else "text/html"
-                socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Type: $type\r\nContent-Length: ${data.size}\r\nConnection: close\r\n\r\n".toByteArray()+data)
-            }}catch(_:java.io.IOException) { }}.apply {isDaemon=true;start()}}catch(_:java.io.IOException) { }
-        }.apply {isDaemon=true;start()}
-        val monitor=runner.addMonitor(android.content.IntentFilter(Intent.ACTION_VIEW).apply {addDataScheme("mailto")},Instrumentation.ActivityResult(android.app.Activity.RESULT_OK,Intent()),true)
-        lateinit var root:android.widget.FrameLayout
-        lateinit var panes:Panes
-        lateinit var dialog:android.app.Dialog
-        runner.runOnMainSync {root=android.widget.FrameLayout(app);panes=Panes(app,root,net,cfg);dialog=android.app.Dialog(app).apply {setContentView(root);show();window!!.setLayout(-1,700)}}
-        fun show(id:String,url:String,cmd:String=""):WebView {
-            lateinit var web:WebView
-            runner.runOnMainSync {
-                panes.browser(JSONObject().put("visible",true).put("active",id).put("cmd",cmd).put("tabs",JSONArray().put(JSONObject().put("id",id).put("url",url))).put("rect",JSONObject().put("x",0).put("y",0).put("w",300).put("h",200)))
-                web=(0 until root.childCount).map {root.getChildAt(it)}.filterIsInstance<WebView>().single()
-            }
-            return web
-        }
-        fun eval(web:WebView,code:String):String? {val done=CountDownLatch(1);var result:String?=null;runner.runOnMainSync {web.evaluateJavascript(code){result=it;done.countDown()}};check(done.await(3,TimeUnit.SECONDS));return result}
-        fun currentUrl(web:WebView):String = org.json.JSONTokener(eval(web,"location.href")).nextValue().toString()
+        val app=activity();val server=ServerSocket(0);val origin="http://127.0.0.1:${server.localPort}"
+        val bytes="<html><body><img src='https://dshfile.pd.local/private.svg' onload='window.observed=173' onerror='window.observed=-1'><script>window.bridgeType=typeof window.PDNative;location.href='mailto:automatic@audit.invalid'</script></body></html>".toByteArray()
+        val fixture=Thread {while(!server.isClosed)try{server.accept().use{socket->val reader=socket.getInputStream().bufferedReader();while(!reader.readLine().isNullOrEmpty()){};socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray()+bytes)}}catch(_:java.io.IOException){}}.apply{isDaemon=true;start()}
+        val privateImages=AtomicInteger();val owner="audit-shared-browser";val monitor=runner.addMonitor(android.content.IntentFilter(Intent.ACTION_VIEW).apply{addDataScheme("mailto")},Instrumentation.ActivityResult(android.app.Activity.RESULT_OK,Intent()),true)
+        fun views(view:android.view.View):List<android.view.View> = listOf(view)+if(view is android.view.ViewGroup)(0 until view.childCount).flatMap{views(view.getChildAt(it))}else emptyList()
+        fun find(prefix:String):WebView? {var result:WebView?=null;runner.runOnMainSync{result=views(app.window.decorView).filterIsInstance<WebView>().firstOrNull{it.url.orEmpty().startsWith(prefix)}};return result}
+        fun eval(web:WebView,script:String):String? {val latch=CountDownLatch(1);var value:String?=null;runner.runOnMainSync{web.evaluateJavascript(script){value=it;latch.countDown()}};check(latch.await(3,TimeUnit.SECONDS));return value}
         try {
-            val normal=show("normal","https://dshfile.pd.local/safe.html")
-            waitFor("Normal local report did not load its image") {eval(normal,"window.observed") == "173"}
-            val baseline=privateRequests.get()
-            val remote=show("remote","http://127.0.0.1:${server.localPort}/remote")
-            var observed:String?=null
-            waitFor("Remote image attempt did not complete") {observed=eval(remote,"window.observed");observed in setOf("173","-1")}
-            Thread.sleep(400)
-            val automatic=monitor.hits
-            runner.sendStatus(0,Bundle().apply {putString("stream","OBSERVED: localImage=173 remoteImage=$observed authenticatedPrivateImageRequests=${privateRequests.get()-baseline} automaticExternalIntents=$automatic\n")})
-            runner.runOnMainSync {remote.requestFocus();remote.evaluateJavascript("document.querySelector('#go').focus()",null)}
-            runner.waitForIdleSync();runner.sendKeySync(KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_ENTER));runner.sendKeySync(KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_ENTER))
-            waitFor("User link activation did not reach the monitored intent") {monitor.hits==automatic+1}
-            check(observed=="-1") {"Remote browser page embedded an authenticated private image"}
-            check(automatic==0) {"Remote browser page launched an external intent without a user gesture"}
-            passed("Native reports retain same-origin images; remote pages cannot embed private files or auto-open external apps; user links still work")
-            val fileUrl="https://dshfile.pd.local/safe.html"
-            val remoteUrl="http://127.0.0.1:${server.localPort}/remote"
-            val same=show("remote",fileUrl,"navigate")
-            check(same===remote) {"Address navigation replaced the existing browser tab"}
-            waitFor("Explicit address navigation could not load the local report") {eval(same,"window.observed")=="173"}
-            val beforeRemote=fileRequests.get()
-            show("remote",remoteUrl,"navigate")
-            waitFor("A previously authorized tab retained file access after leaving the report") {currentUrl(same)==remoteUrl && eval(same,"window.observed")=="-1"}
-            runner.runOnMainSync {same.evaluateJavascript("location.href="+JSONObject.quote(fileUrl),null)}
-            Thread.sleep(350)
-            check(currentUrl(same)==remoteUrl) {"A remote page navigated into the private file origin"}
-            check(fileRequests.get()==beforeRemote) {"Leaving the report did not revoke private file requests"}
-            show("remote",remoteUrl,"back")
-            waitFor("Back navigation did not restore a legitimate local report") {currentUrl(same)==fileUrl && eval(same,"window.observed")=="173"}
-            show("remote",fileUrl,"fwd")
-            waitFor("Forward navigation restored private file access to a remote page") {currentUrl(same)==remoteUrl && eval(same,"window.observed")=="-1"}
-            passed("Address-bar file navigation keeps the same tab; leaving a report revokes file access; remote navigation cannot grant it; back and forward preserve the boundary")
-            val racing=show("remote","http://127.0.0.1:${server.localPort}/race","navigate")
-            waitFor("Old remote document did not start its polling control") {(eval(racing,"window.raceTicks")?.toIntOrNull()?:0)>2}
-            val privateBefore=privateRequests.get()
-            val ticksBefore=eval(racing,"window.raceTicks")!!.toInt()
-            show("remote","https://dshfile.pd.local/slow.html","navigate")
-            check(slowStarted.await(3,TimeUnit.SECONDS)) {"Slow file navigation did not enter the proxy"}
-            Thread.sleep(600)
-            val ticksDuring=eval(racing,"window.raceTicks")?.toIntOrNull()?:0
-            val borrowed=privateRequests.get()-privateBefore
-            runner.sendStatus(0,Bundle().apply {putString("stream","OBSERVED: transition oldPageTicks=$ticksBefore->$ticksDuring authenticatedPrivateRequests=$borrowed\n")})
-            check(ticksDuring>ticksBefore) {"Old document did not remain active during the delayed navigation control"}
-            check(borrowed==0) {"Old remote document borrowed private file access before report commit"}
-            runner.runOnMainSync {racing.evaluateJavascript("location.href='https://dshfile.pd.local/unrequested.html'",null)}
+            PluginSiteBrowserHost.openDocument(app,owner,"https://dshfile.pd.local/report.html","Synthetic report",{request->
+                val image=request.url.path=="/private.svg"
+                if(image)privateImages.incrementAndGet()
+                val body=if(image)"<svg xmlns='http://www.w3.org/2000/svg' width='173' height='19'></svg>" else "<html><body><img src='private.svg' onload='window.observed=this.naturalWidth'></body></html>"
+                android.webkit.WebResourceResponse(if(image)"image/svg+xml" else "text/html","UTF-8",java.io.ByteArrayInputStream(body.toByteArray()))
+            },{})
+            waitFor("Shared document browser did not open"){find("https://dshfile.pd.local/")!=null}
+            val document=find("https://dshfile.pd.local/")!!
+            waitFor("Controlled document lost its relative image"){eval(document,"window.observed")=="173"}
+            val baseline=privateImages.get()
+            PluginSiteBrowserHost.openCore(app,owner,JSONObject().put("url",origin+"/remote"),{})
+            waitFor("Shared core browser did not open"){find(origin)!=null};val remote=find(origin)!!
+            waitFor("Remote image did not finish"){eval(remote,"window.observed")=="-1"}
+            check(eval(remote,"window.bridgeType")=="\"undefined\""){"Website received a native bridge"}
+            check(privateImages.get()==baseline){"Remote website borrowed a controlled file provider"}
+            check(monitor.hits==0){"Website launched a non-HTTP application intent"}
+            runner.runOnMainSync{remote.evaluateJavascript("location.href='https://dshfile.pd.local/unrequested.html'",null)}
             Thread.sleep(250)
-            runner.sendStatus(0,Bundle().apply {putString("stream","OBSERVED: unrequestedAuthenticatedNavigations=${unexpectedNavigations.get()}\n")})
-            check(unexpectedNavigations.get()==0) {"Old remote page replaced the authorized file destination with another private path"}
-            slowRelease.countDown()
-            waitFor("Delayed legitimate report lost its relative image") {eval(racing,"window.observed")=="173"}
-            passed("While file navigation is delayed, the still-running remote document cannot borrow authenticated file access; the committed report retains its image")
-            show("remote","https://dshfile.pd.local/frames.html","navigate")
-            waitFor("Cross-origin report frame was not rejected by the real CSP") {eval(racing,"window.blockedFrame")=="true"}
-            waitFor("Same-origin report frame lost its relative image") {eval(racing,"window.localFrame")=="173"}
-            passed("Real report CSP blocks foreign child frames and preserves same-origin frames with relative images")
-        } finally {slowRelease.countDown();runner.removeMonitor(monitor);runner.runOnMainSync {panes.close();dialog.dismiss()};net.dispose();server.close();fixture.join(1000);context.getSharedPreferences("audit-browser-pd",android.content.Context.MODE_PRIVATE).edit().clear().commit()}
+            check(privateImages.get()==baseline){"Remote navigation reached the document provider"}
+            passed("Unified document and website surfaces preserve relative document images, isolate file providers, and expose no native bridge to websites")
+        } finally {runner.runOnMainSync{PluginSiteBrowserHost.closeOwner(owner)};runner.removeMonitor(monitor);server.close();fixture.join(1000)}
     }
 
     private fun runtimeDependencies() {
@@ -413,7 +337,7 @@ internal class PluginRegressionDeviceChecks(private val runner: Instrumentation)
             check(find(ids[1])===updated)
             passed("Removal releases only the removed plugin page")
             val panes=MainActivity::class.java.getDeclaredField("panes").apply {isAccessible=true}.get(app) as Panes
-            runner.runOnMainSync {app.openPlugin("harness");panes.browser(JSONObject().put("visible",false).put("tabs",JSONArray().put(JSONObject().put("id","fixture-tab").put("url","about:blank"))));panes.dshWeb(JSONObject().put("visible",true))}
+            runner.runOnMainSync {app.openPlugin("harness");PluginSiteBrowserHost.openCore(app,"fixture-destroy-browser",JSONObject().put("url","http://127.0.0.1:1/fixture"),{});panes.dshWeb(JSONObject().put("visible",true))}
             open(draft("import {definePage} from '/framework/v1/page.js';export default definePage({mount(ctx){ctx.root.textContent='DESTROY_FIXTURE'}});"))
             runner.runOnMainSync {app.finish()}
             waitFor("Activity not destroyed") {app.isDestroyed}

@@ -1,4 +1,4 @@
-import { esc } from './util.js';
+import { esc, fmtBytes } from './util.js';
 
 const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const INLINE_IMAGE_RE = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/;
@@ -36,7 +36,7 @@ function inlineHtml(image) {
 function durableHtml(image, state = { status: 'loading' }) {
   const common = `data-attachment-id="${esc(image.attachmentId)}" data-image-title="${esc(image.label)}"`;
   if (state.status === 'loaded') {
-    return `<button type="button" class="chat-image" ${common} data-status="loaded" aria-label="查看图片：${esc(image.label)}"><img src="${esc(state.src)}" alt="${esc(image.label)}" loading="lazy"><span class="chat-image-failure" hidden>图片读取失败，点击重试查看</span></button>`;
+    return `<div class="chat-image-slot"><button type="button" class="chat-image" ${common} data-status="loaded" aria-label="查看图片：${esc(image.label)}"><img src="${esc(state.src)}" alt="${esc(image.label)}" loading="lazy"><span class="chat-image-failure" hidden>图片读取失败，点击重试查看</span></button>${state.error ? `<button type="button" class="image-retry" data-image-retry="${esc(image.attachmentId)}">原图读取失败，重试</button>` : ''}</div>`;
   }
   if (state.status === 'error') {
     const detail = state.error ? `<small>${esc(state.error)}</small>` : '';
@@ -58,11 +58,15 @@ export function userImagesHtml(content, options = {}) {
         if (durable) images.push(durableHtml(durable, options.attachment?.(durable))); else invalid++;
       }
     } else if (block?.type === 'file') {
-      files.push(String(block.attachment?.name || block.name || block.path || '附件'));
+      const file = block.attachment || block;
+      const name = String(file.name || block.name || '附件');
+      const kind = /^video\//.test(block.mediaType || '') || /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : 'file';
+      const attrs = `${!file.attachmentId && block.handle ? `data-file-handle="${esc(block.handle)}" ` : ''}data-attachment-id="${esc(file.attachmentId || '')}" data-file-name="${esc(name)}" data-file-bytes="${Number(file.bytes || block.bytes || 0)}"`;
+      files.push(`<div class="chat-file"><button type="button" class="chat-file-open" data-file-open ${attrs}><span class="chat-file-icon">${kind === 'video' ? '▶' : '▤'}</span><span class="chat-file-info"><b>${esc(name)}</b><small>${kind === 'video' ? '视频' : '文件'} · ${esc(fmtBytes(file.bytes || block.bytes || 0))}</small></span></button><button type="button" class="chat-file-save" data-file-save ${attrs} aria-label="保存 ${esc(name)}">保存</button></div>`);
     }
   }
   let html = images.length ? `<div class="user-images">${images.join('')}</div>` : '';
   if (invalid) html += `${html ? '' : '\n'}[图片 ×${invalid} 无法预览]`;
-  if (files.length) html += `${html ? '\n' : ''}[附件 ${esc(files.join('、'))}]`;
+  if (files.length) html += `<div class="chat-files">${files.join('')}</div>`;
   return html;
 }

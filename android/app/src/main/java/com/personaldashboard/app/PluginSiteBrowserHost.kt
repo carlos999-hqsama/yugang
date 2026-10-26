@@ -11,6 +11,8 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -31,7 +33,7 @@ object PluginSiteBrowserHost {
     private val main = Handler(Looper.getMainLooper())
     private data class Entry(
         val owner: String,
-        val pluginId: String,
+        val pluginId: String?,
         val activity: MainActivity,
         val browser: PluginSiteBrowser,
         val chrome: PluginSiteBrowserChrome,
@@ -54,6 +56,74 @@ object PluginSiteBrowserHost {
         require(args.keys().asSequence().all { it in allowed }) { "站内浏览器只接受 url 和 title" }
         val url = PluginSiteBrowserPolicy.openRequest(JSONObject().put("url", args.getString("url")))
         val title = args.optString("title", "站内浏览器").filterNot { it.isISOControl() }.take(80)
+        openInternal(
+            activity, owner, pluginId, revision, url, title, admit, null, onClosed, onDownload,
+        )
+    }
+
+    /** Opens a native Core user action without a plugin identity, store lookup, or bridge. */
+    fun openCore(
+        activity: MainActivity,
+        owner: String,
+        args: JSONObject,
+        onClosed: (JSONObject) -> Unit,
+        onDownload: (JSONObject) -> Unit = {},
+    ) {
+        val url = PluginSiteBrowserPolicy.openCoreRequest(args)
+        val title = args.optString("title", "站内浏览器").filterNot { it.isISOControl() }.take(80)
+        openInternal(
+            activity, owner, null, null, url, title, null, null, onClosed, onDownload,
+        )
+    }
+
+    /** Native button/anchor handlers have already observed a real click. No bridge admission. */
+    fun openUserLink(
+        activity: MainActivity,
+        owner: String,
+        pluginId: String,
+        revision: String,
+        rawUrl: String,
+    ) {
+        val url = PluginSiteBrowserPolicy.url(rawUrl)
+        openInternal(activity, owner, pluginId, revision, url, "网页", { true }, null, {}, {}, false)
+    }
+
+    /**
+     * [resource] runs on WebView IO and download worker threads. It must validate the request path
+     * and provenance and return only controlled content. Null is refused, never fetched from network.
+     * Downloads are synthetic non-main-frame GETs without gesture or Cookie and carry the current
+     * document as Referer. A 2xx response is required and redirects are not followed by the host.
+     * A real external-link gesture closes the document and adds `openCoreUrl` to the close receipt.
+     */
+    fun openDocument(
+        activity: MainActivity,
+        owner: String,
+        url: String,
+        title: String,
+        resource: (WebResourceRequest) -> WebResourceResponse?,
+        onClosed: (JSONObject) -> Unit,
+        onDownload: (JSONObject) -> Unit = {},
+    ) {
+        val target = PluginSiteBrowserPolicy.documentInitialUrl(url)
+        val cleanTitle = title.filterNot { it.isISOControl() }.take(80)
+        openInternal(
+            activity, owner, null, null, target, cleanTitle, null, resource, onClosed, onDownload,
+        )
+    }
+
+    private fun openInternal(
+        activity: MainActivity,
+        owner: String,
+        pluginId: String?,
+        revision: String?,
+        url: String,
+        title: String,
+        admit: (() -> Boolean)?,
+        documentResource: ((WebResourceRequest) -> WebResourceResponse?)?,
+        onClosed: (JSONObject) -> Unit,
+        onDownload: (JSONObject) -> Unit,
+        requireBrowserCapability: Boolean = true,
+    ) {
         main.post {
             if (activity.isFinishing || activity.isDestroyed || !activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                 onClosed(PluginSiteBrowserPolicy.closeReceipt(false, url).put("reason", "应用不在前台，未打开网站"))
@@ -64,56 +134,73 @@ object PluginSiteBrowserHost {
             var entry: Entry? = null
             var shown = false
             try {
-                PluginPlatform.withActiveRevision(activity, pluginId, revision) {
-                    val bundle = PluginPlatform.store(activity).activeBundle(pluginId)
-                    PluginPlatform.store(activity).requireCapability(pluginId, "plugin.browser")
-                    require("plugin.browser" in PluginContract.caps(bundle)) { "插件未声明 plugin.browser" }
+                fun openAndMount() {
+                    if (pluginId != null && requireBrowserCapability) {
+                        val bundle = PluginPlatform.store(activity).activeBundle(pluginId)
+                        PluginPlatform.store(activity).requireCapability(pluginId, "plugin.browser")
+                        require("plugin.browser" in PluginContract.caps(bundle)) { "插件未声明 plugin.browser" }
+                    }
                     check(PluginSiteBrowser.isSupported()) { "当前系统 WebView 不支持独立登录空间，请更新 Android System WebView" }
-                    // A failed construction may still have created a profile. Keep cleanup ownership.
-                    check(
-                        activity.getSharedPreferences(PROFILE_MARKERS, Context.MODE_PRIVATE)
-                            .edit().putBoolean(pluginId, true).commit(),
-                    ) { "无法记录网站登录空间" }
+                    if (pluginId != null) {
+                        // A failed construction may still have created a profile. Keep cleanup ownership.
+                        check(
+                            activity.getSharedPreferences(PROFILE_MARKERS, Context.MODE_PRIVATE)
+                                .edit().putBoolean(pluginId, true).commit(),
+                        ) { "无法记录网站登录空间" }
+                    }
+                    val listener =
+                        object : PluginSiteBrowser.Listener {
+                            override fun onClosed(receipt: JSONObject) {
+                                chrome?.detach()
+                                entry?.let { entries.remove(it) }
+                                onClosed(receipt.put("opened", receipt.optBoolean("opened") && shown))
+                            }
+
+                            override fun onDownload(receipt: JSONObject) {
+                                if (receipt.optBoolean("downloaded")) chrome?.addDownload(receipt)
+                                Toast.makeText(
+                                    activity,
+                                    if (receipt.optBoolean("downloaded"))
+                                        "已保存：${receipt.optString("displayPath", "下载/鱼缸")}"
+                                    else "下载未完成",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                onDownload(receipt)
+                            }
+
+                            override fun onBlocked(reason: String) {
+                                Toast.makeText(activity, reason, Toast.LENGTH_SHORT).show()
+                            }
+
+                            override fun onNavigationChanged(url: String) {
+                                chrome?.navigationChanged(url)
+                            }
+
+                            override fun onLoadProgress(progress: Int) {
+                                chrome?.setProgress(progress)
+                            }
+                        }
                     browser =
-                        PluginSiteBrowser.open(
-                            activity,
-                            pluginId,
-                            url,
-                            PluginSiteBrowser.HostGestureAdmission { id, target ->
-                                id == pluginId && target == url && admit()
-                            },
-                            object : PluginSiteBrowser.Listener {
-                                override fun onClosed(receipt: JSONObject) {
-                                    chrome?.detach()
-                                    entry?.let { entries.remove(it) }
-                                    onClosed(receipt.put("opened", receipt.optBoolean("opened") && shown))
-                                }
-
-                                override fun onDownload(receipt: JSONObject) {
-                                    if (receipt.optBoolean("downloaded")) chrome?.addDownload(receipt)
-                                    Toast.makeText(
-                                        activity,
-                                        if (receipt.optBoolean("downloaded"))
-                                            "已保存：${receipt.optString("displayPath", "下载/鱼缸")}"
-                                        else "下载未完成",
-                                        Toast.LENGTH_LONG,
-                                    ).show()
-                                    onDownload(receipt)
-                                }
-
-                                override fun onBlocked(reason: String) {
-                                    Toast.makeText(activity, reason, Toast.LENGTH_SHORT).show()
-                                }
-
-                                override fun onNavigationChanged(url: String) {
-                                    chrome?.navigationChanged(url)
-                                }
-
-                                override fun onLoadProgress(progress: Int) {
-                                    chrome?.setProgress(progress)
-                                }
-                            },
-                        )
+                        when {
+                            pluginId != null ->
+                                PluginSiteBrowser.open(
+                                    activity,
+                                    pluginId,
+                                    url,
+                                    PluginSiteBrowser.HostGestureAdmission { id, target ->
+                                        id == pluginId && target == url && requireNotNull(admit).invoke()
+                                    },
+                                    listener,
+                                )
+                            documentResource != null ->
+                                PluginSiteBrowser.openDocument(
+                                    activity,
+                                    url,
+                                    documentResource,
+                                    listener,
+                                )
+                            else -> PluginSiteBrowser.openCore(activity, url, listener)
+                        }
                     val current = requireNotNull(browser)
                     val currentChrome =
                         PluginSiteBrowserChrome(
@@ -127,6 +214,10 @@ object PluginSiteBrowserHost {
                     entry =
                         Entry(owner, pluginId, activity, current, currentChrome).also { entries.add(it) }
                     shown = true
+                }
+                if (pluginId == null) openAndMount()
+                else PluginPlatform.withActiveRevision(activity, pluginId, requireNotNull(revision)) {
+                    openAndMount()
                 }
             } catch (error: Exception) {
                 chrome?.detach()
@@ -191,6 +282,30 @@ object PluginSiteBrowserHost {
 
     fun onDestroy(activity: MainActivity) {
         main.post { closeNow(activity) }
+    }
+
+    /** Bounded text only. No native bridge is installed in website content. */
+    fun snapshot(activity: MainActivity, plugin: String, revision: String, callback: (JSONObject) -> Unit) {
+        PluginPlatform.store(activity).requireRevision(plugin, revision)
+        val entry = entries.lastOrNull { it.activity === activity && it.pluginId == plugin }
+            ?: error("当前插件没有打开的网页")
+        val expected = entry.browser.view.url.orEmpty()
+        val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+        val timeout = Runnable { if(finished.compareAndSet(false,true))callback(JSONObject().put("error","网页读取超时").put("code","timeout")) }
+        main.postDelayed(timeout, 5000)
+        entry.browser.view.evaluateJavascript("JSON.stringify({title:document.title.slice(0,512),url:location.href,text:(document.body?.innerText||'').slice(0,32000)})") { raw ->
+            if(!finished.compareAndSet(false,true))return@evaluateJavascript
+            main.removeCallbacks(timeout)
+            try {
+                PluginPlatform.store(activity).requireRevision(plugin, revision)
+                check(entry in entries && entry.browser.view.url == expected) { "网页已切换" }
+                require(raw.length<=256*1024){"网页结果过大"}
+                val decoded = org.json.JSONTokener(raw).nextValue() as? String ?: error("网页未返回文本")
+                val data = JSONObject(decoded)
+                data.put("text",data.optString("text").take(32000)).put("externalData",true)
+                callback(data)
+            } catch(_:Exception) {callback(JSONObject().put("error","网页已关闭或内容不可读取").put("code","page_changed"))}
+        }
     }
 
     /** Called from uninstall's worker after the revision has been invalidated. */

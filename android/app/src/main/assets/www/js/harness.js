@@ -2,7 +2,7 @@ import {voiceScope,voiceFrame,voiceInterrupted} from './agent-voice.js';
 // Harness 页：原生界面对接 App 内置运行时里的 dsh（或高级选项里的外部 dsh）：会话侧栏 + 对话 + 内置浏览器预览，
 // 备用模式为内嵌 dsh web（明确标注）。
 import { S } from './icons.js';
-import { esc, md as renderMarkdown, uuid, basename, fmtBytes, debounce, homeAbbr } from './util.js';
+import { esc, linkText, md as renderMarkdown, uuid, basename, fmtBytes, debounce, homeAbbr } from './util.js';
 import { dsh, onDsh, api, follow, decideApproval, startDsh, reconnectNow } from './dsh.js';
 import { toolQuestionHtml, extraQuestionHtml, captureQuestionCards, restoreQuestionCards, isQuestionTextarea, questionInput, questionClick, hasOpenQuestion } from './questions.js';
 import { previewArtifact, Conv, category, resolvePath } from './conv.js';
@@ -32,10 +32,10 @@ import {openBotSettingsSheet,promptBotCreation} from './bot-settings.js';
 const H = {
   sel: LS('sel', null), mobileChat: !!LS('sel', null), conv: null, fh: null,
   filter: '', searching: false, noside: LS('noside', false), expand: false,
-  tabs: LS('tabs', []), active: LS('active', null), meta: {},
+
   drafts: {}, pending: [], openTools: new Set(), attach: [], attachmentDrafts: new Map(), imageReading: new Map(), pickKey: null, creating: false, sessionCreating: new Set(),
   draftModels: new Map(), sizes: {}, mode: 'native', cfg: {},
-  pendingInner: false, disclosures: new Map(), historyMore: false, historyBusy: false, historyEpoch: 0, navigationEpoch: 0,
+  disclosures: new Map(), historyMore: false, historyBusy: false, historyEpoch: 0, navigationEpoch: 0,
   stoppingSid: '', approvalViews: new Map(),
   bots: null, botId: LS('botId','default'), botError: '',
   readings: new Map(), inspector: LS('inspector', false),
@@ -62,8 +62,9 @@ function readDurableAttachment(sid, image, force = false) {
   }
   let entry = session.items.get(image.attachmentId);
   if (entry?.status === 'loading') return entry;
-  if (entry && !force) return entry;
-  entry = { status: 'loading', error: '', src: '' };
+  if (entry && !force && (!entry.optimistic || entry.refreshing)) return entry;
+  const fallback = entry?.src || '';
+  entry = { status: fallback ? 'loaded' : 'loading', error: '', src: fallback, refreshing: true };
   session.items.set(image.attachmentId, entry);
   (async () => {
     const result = await api.attachment(sid, image.attachmentId);
@@ -74,11 +75,12 @@ function readDurableAttachment(sid, image, force = false) {
     return src;
   })().then(src => {
     if (session.cancelled) return;
-    entry.status = 'loaded'; entry.src = src; entry.error = '';
+    entry.status = 'loaded'; entry.src = src; entry.error = ''; entry.refreshing = false;
     if (H.sel === sid) renderMsgsSoon();
   }, error => {
     if (session.cancelled) return;
-    entry.status = 'error'; entry.error = String(error?.message || error || '请重试').slice(0, 200);
+    entry.status = fallback ? 'loaded' : 'error'; entry.refreshing = false;
+    entry.error = String(error?.message || error || '请重试').slice(0, 200);
     if (H.sel === sid) renderMsgsSoon();
   });
   return entry;
@@ -105,7 +107,24 @@ export async function mount(root) {
     if (e.target.matches('details[data-disclosure]')) H.disclosures.set(e.target.dataset.disclosure, e.target.open);
   }, true);
   onDsh(onDshChange);
-  on('browser', onBrowserEvent);
+  on('shareDraft', shared => {
+    if (!H.bots?.bots.some(bot => bot.id === shared.botId)) return;
+    selectBot(shared.botId);
+    const key = draftKey();
+    H.drafts[key] = [H.drafts[key] || '', shared.text || ''].filter(Boolean).join('\n');
+    const files = H.attachmentDrafts.get(key) || [];
+    for (const file of shared.files || []) {
+      if (files.length < 6) files.push({type:'file',...file});
+      else native.removeAttachment(file.handle).catch(()=>{});
+    }
+    H.attachmentDrafts.set(key,files);H.attach=files;
+    const input=el.querySelector('.input textarea');if(input)input.value=H.drafts[key];
+    renderMsgsSoon();updateInputRow();
+  });
+  on('attachmentProgress', progress => {
+    const pending = H.pending.find(p => p.uploadIds?.includes(progress.requestId));
+    if (pending) { pending.uploadText = `正在上传 ${fmtBytes(progress.bytes)} / ${fmtBytes(progress.total)}`; renderMsgsSoon(); }
+  });
   onRt(() => { if (H.mode === 'web' || !el?.querySelector('.list')) return; renderBanner(); renderMsgsSoon(); updateInputRow(); });
   on('paired', async () => { H.cfg = await native.getConfig(); RT.at = 0; renderMsgs(); renderBanner(); });
   document.getElementById('filepick').addEventListener('change', onPick);
@@ -124,18 +143,18 @@ async function refreshMode() {
   build();
 }
 export function onLayout() {
-  const was = cover; cover = document.body.classList.contains('cover');
+  cover = document.body.classList.contains('cover');
   if (!el) return;
   // 折叠只调整布局，保留输入、光标、阅读位置和原生预览对应的 DOM。
   el.classList.toggle('mobile-chat', H.mobileChat);
-  el.classList.toggle('expand', !!H.expand && !cover);
-  el.classList.toggle('nobrowser', H.mode === 'web' || cover || !H.tabs.length);
+
+  el.classList.add('nobrowser');
   applyWidths();
   renderHead();
   const ta = el.querySelector('.input textarea'); if (ta) autosize(ta);
   syncOverlays();
   chatScroll?.refresh();
-  if (was && !cover && H.pendingInner) { H.pendingInner = false; toast('已在内屏预览中打开'); }
+
 }
 export function onShow() {
   pageVisible = true;
@@ -154,7 +173,7 @@ function build() {
   cover = document.body.classList.contains('cover');
   el.classList.toggle('noside', !!H.noside);
   el.classList.toggle('mobile-chat', H.mobileChat);
-  el.classList.toggle('expand', !!H.expand && !cover);
+
   if (H.mode === 'web') {
     chatScroll?.attach(null);
     el.classList.add('nobrowser');
@@ -168,7 +187,7 @@ function build() {
   const ta = el.querySelector('.input textarea');
   const focus = ta && document.activeElement === ta ? [ta.selectionStart, ta.selectionEnd, ta.selectionDirection] : null;
   const keepText = ta ? ta.value : (H.drafts[draftKey()] || '');
-  el.classList.toggle('nobrowser', cover || !H.tabs.length);
+  el.classList.add('nobrowser');
   el.innerHTML = `
 <div class="side"><div class="sidehead"><b>鱼缸</b><span><button type="button" class="clickable" data-act="search" aria-label="搜索 Bot">${S.search}</button><button type="button" class="clickable" data-act="newBot" aria-label="添加 Bot">${S.plus}</button></span></div>
 <input class="sfilter${H.searching ? '' : ' hide'}" placeholder="搜索 Bot" aria-label="搜索 Bot 名称" maxlength="500" value="${esc(H.filter)}">
@@ -177,8 +196,7 @@ function build() {
 <div class="chat"><div class="chead"></div><div class="bn"></div><div class="msgs"></div><div class="apvw"></div>
 <div class="input"><textarea rows="1" placeholder="给对话运行时发消息"></textarea><div class="atts"></div><div class="row"></div></div></div>
 <aside class="bot-detail" aria-label="当前 Bot 的任务详情"></aside>
-<div class="dv b" data-drag="chat"></div>
-<div class="br"><div class="tabs"></div><div class="bbar"></div><div class="bview"><div class="bprog"></div><div class="empty"></div></div></div>`;
+`;
   const nta = el.querySelector('.input textarea'); nta.value = keepText; autosize(nta);
   applyWidths();
   const nextMsgs = el.querySelector('.msgs');
@@ -186,7 +204,7 @@ function build() {
   renderSide(); renderHead(); renderBanner();
   // build 已替换滚动容器；先渲染内容再让 end() 恢复锚点，避免 begin()
   // 把空容器的顶部误判成用户滚动并覆盖旧锚点。
-  renderMsgs(false, { beginScroll: false }); renderApprovals(); updateInputRow(); renderBrowser();
+  renderMsgs(false, { beginScroll: false }); renderApprovals(); updateInputRow();
   if (cards) restoreQuestionCards(nextMsgs, cards);
   if (focus) { nta.focus({ preventScroll: true }); nta.setSelectionRange(...focus); }
   if (H.sel && (!H.conv || H.conv.sid !== H.sel || (!H.fh && dsh.state === 'online'))) select(H.sel, { keep: true });
@@ -404,6 +422,18 @@ function dropPending(ev, sid) {
   if (!rpc) return;
   H.pending = H.pending.filter(p => {
     if (p.sid !== sid || p.rpcId !== rpc) return true;
+    // The receipt can arrive before the normalized bytes. Keep the already-visible thumbnail
+    // while the session-authorized read runs, instead of replacing it with a filename/loading gap.
+    const originals = p.content.filter(b => b.type === 'image');
+    const saved = (ev.data?.content || []).filter(b => b.type === 'image' && b.attachment);
+    if (saved.length && originals.length === saved.length) {
+      let session = attachmentSessions.get(sid);
+      if (!session) { session = {cancelled:false,items:new Map()};attachmentSessions.set(sid,session); }
+      saved.forEach((block,index) => {
+        const id = block.attachment.attachmentId, src = inlineImageSrc(originals[index]);
+        if (src && !session.items.has(id)) session.items.set(id,{status:'loaded',src,error:'',optimistic:true});
+      });
+    }
     p.echoed = true;
     return !!p.sending || !!p.error;
   });
@@ -499,8 +529,9 @@ function artHtml(it) {
   const p = expandHome(it.path); const name = basename(p);
   if (H.sizes[p] === undefined) { H.sizes[p] = null; native.http('dsh', 'HEAD', '/api/file?path=' + encodeURIComponent(p)).then((r) => { const n = +(r.headers?.['content-length'] || 0); H.sizes[p] = n || 0; renderMsgsSoon(); }).catch(() => {}); }
   const size = H.sizes[p] ? ' · ' + fmtBytes(H.sizes[p]) : '';
-  const hint = cover ? '展开内屏查看' : '在右侧预览中打开';
-  return `<div class="art" data-art="${esc(p)}" data-scroll-key="${esc('art:' + p)}"><div class="ic">${S.file}</div><div style="flex:1;min-width:0"><b>产物 ${esc(name)}</b><small>${hint}${size}${it.desc ? ' · ' + esc(it.desc) : ''}</small></div><span style="color:#888">${S.expand}</span></div>`;
+  const hint = '点击打开';
+  const video = /\.(mp4|webm|mov|m4v)$/i.test(name);
+  return `<div class="art" data-scroll-key="${esc('art:' + p)}"><button type="button" class="art-open" data-art="${esc(p)}"><span class="ic">${video ? '▶' : S.file}</span><span class="art-info"><b>${video ? '视频' : '产物'} ${esc(name)}</b><small>${hint}${size}${it.desc ? ' · ' + esc(it.desc) : ''}</small></span></button><button type="button" class="btn art-save" data-art-save="${esc(p)}" aria-label="保存 ${esc(name)}">保存</button></div>`;
 }
 function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true } = {}) {
   const m = el?.querySelector('.msgs'); if (!m) return;
@@ -534,7 +565,7 @@ function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true }
         const activeLabel = latest && !latest.result ? (latest.approval?.state === 'asked' ? '等待授权' : String(latest.args?.description || ({read:'正在读取文件',bash:'正在执行命令',search:'正在搜索',edit:'正在编辑文件',agent:'子任务执行中'}[category(latest)] || '正在调用工具')).slice(0, 80)) : '';
         return `<details class="process-fold" data-disclosure="${esc(disclosureKey)}" data-scroll-key="${esc(key)}"${expanded ? ' open' : ''}><summary>${it.running ? '<span class="spin" style="width:12px;height:12px"></span>' : ''}<span>${esc(activeLabel || it.label)}</span><small>执行过程</small></summary><div class="process-content">${it.items.map((child, i) => renderItem(child, i)).join('')}</div></details>`;
       }
-      if (it.k === 'user') html += `<div class="ubub${!it.text?.trim() && it.content?.length && it.content.every(block => block.type === 'image') ? ' image-only' : ''}" data-scroll-key="${esc(key)}">${esc(it.text)}${userImagesHtml(it.content, { attachment: image => readDurableAttachment(H.sel, image) })}</div>`;
+      if (it.k === 'user') html += `<div class="ubub${!it.text?.trim() && it.content?.length && it.content.every(block => block.type === 'image') ? ' image-only' : ''}" data-scroll-key="${esc(key)}">${linkText(it.text)}${userImagesHtml(it.content, { attachment: image => readDurableAttachment(H.sel, image) })}</div>`;
       else if (it.k === 'text') html += `<div class="mdw${it.live ? ' live' : ''}" data-scroll-key="${esc(key)}">${md(it.text)}</div>`;
       else if (it.k === 'think') html += `<details class="reasoning-fold" data-disclosure="${esc(H.sel + ':' + it.key)}" data-scroll-key="${esc(key)}"${H.disclosures.get(H.sel + ':' + it.key) ? ' open' : ''}><summary>${it.live ? '正在思考…' : '思考过程'}</summary><div class="think">${esc(it.text)}</div></details>`;
       else if (it.k === 'tools') html += lineFor(it);
@@ -549,12 +580,13 @@ function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true }
 
   }
   for (const p of H.pending.filter(x => x.sid === H.sel)) {
-    const failure = p.error ? `<small class="pending-state">${p.echoed ? '发送确认失败' : '发送失败'}：${esc(p.error)} <button type="button" class="btn" data-resend="${esc(p.rpcId)}">重试</button></small>` : '';
-    if (!p.echoed) html += `<div class="ubub pending${!p.text?.trim() && p.content?.length && p.content.every(block => block.type === 'image') ? ' image-only' : ''}" data-scroll-key="${esc('pending:' + p.rpcId)}">${esc(p.text)}${userImagesHtml(p.content)}${failure}</div>`;
+    const cancelUpload = p.sending && p.uploadText ? `<button type="button" class="btn" data-cancel-upload="${esc(p.rpcId)}">取消上传</button>` : '';
+    const failure = p.error ? `<small class="pending-state">${p.echoed ? '发送确认失败' : '发送失败'}：${esc(p.error)} <button type="button" class="btn" data-resend="${esc(p.rpcId)}">重试</button> <button type="button" class="btn" data-discard="${esc(p.rpcId)}">放弃重试</button></small>` : '';
+    if (!p.echoed) html += `<div class="ubub pending${!p.text?.trim() && p.content?.length && p.content.every(block => block.type === 'image') ? ' image-only' : ''}" data-scroll-key="${esc('pending:' + p.rpcId)}">${linkText(p.text)}${userImagesHtml(p.content)}${failure}${cancelUpload}</div>`;
     else if (failure) html += `<div class="sysnote" data-scroll-key="${esc('pending-error:' + p.rpcId)}">${failure}</div>`;
   }
   const pending = H.pending.findLast(p => p.sid === H.sel && !p.error);
-  if (pending && !hasActivity) html += `<div class="tool send-status" role="status" data-scroll-key="pending-status:${esc(pending.rpcId)}"><span class="spin" style="width:11px;height:11px"></span><span>${pending.sending ? '正在发送…' : '正在等待处理…'}</span></div>`;
+  if (pending && !hasActivity) html += `<div class="tool send-status" role="status" data-scroll-key="pending-status:${esc(pending.rpcId)}"><span class="spin" style="width:11px;height:11px"></span><span>${esc(pending.uploadText || (pending.sending ? '正在发送…' : '正在等待处理…'))}</span></div>`;
   if (!H.sel && H.sessionCreating.has(draftKey())) html += `<div class="tool send-status" role="status" data-scroll-key="creating-status"><span class="spin" style="width:11px;height:11px"></span><span>正在发送…</span></div>`;
   if (H.sel) html += extraQuestionHtml(H.sel, seenQ, false);
   // 解包进度和连接事件会刷新消息区；保留追问输入和用户正在输入的 Key 控件。
@@ -618,12 +650,15 @@ function updateInputRow() {
   const m = curModel();
   const ta = el.querySelector('.input textarea');
   if (ta) ta.placeholder = '发送消息…';
-  row.innerHTML = `<button type="button" class="cbtn" data-act="plus" aria-label="添加图片或操作"${reading || creating ? ' disabled' : ''}>${S.plus}</button>
+  row.innerHTML = `<button type="button" class="cbtn" data-act="plus" aria-label="添加附件"${reading || creating ? ' disabled' : ''}>${S.plus}</button>
 <button type="button" class="chip mdl" data-act="model" aria-label="切换模型"><span class="full">${esc(modelLabel(m, false))}</span><span class="short">${esc(modelLabel(m, true))}</span> ${S.chev}</button>
 <div style="flex:1"></div>${showStop ? `<button type="button" class="send stop" aria-label="停止回复" data-act="stop"${dsh.state !== 'online' || stopping ? ' disabled' : ''}>${S.stop}</button>` : ''}${showSend ? `<button type="button" class="send${disabled ? ' off' : ''}" aria-label="发送消息" data-act="send"${disabled ? ' disabled' : ''}>${S.up}</button>` : ''}`;
   const at = el.querySelector('.input .atts');
-  const thumbs = H.attach.map((a, i) => ({ src: inlineImageSrc(a), i })).filter(a => a.src);
-  at.innerHTML = thumbs.length ? `<div class="thumbs" style="margin:0 0 8px">${thumbs.map(({ src, i }) => `<img src="${esc(src)}" data-rm="${i}" title="点击移除" alt="">`).join('')}</div>` : '';
+  at.innerHTML = H.attach.length ? `<div class="draft-attachments">${H.attach.map((a, i) => {
+    const src = inlineImageSrc(a);
+    const title = a.name || '附件';
+    return `<div class="draft-attachment"><button type="button" class="draft-preview" data-draft-preview="${i}" aria-label="预览 ${esc(title)}">${src ? `<img src="${esc(src)}" alt="${esc(title)}">` : `<span class="draft-file-kind">${a.kind === 'video' ? '▶' : S.file}</span><span>${esc(title)}</span><small>${esc(fmtBytes(a.bytes || 0))}</small>`}</button><button type="button" class="draft-remove" data-rm="${i}" aria-label="移除 ${esc(title)}">${S.x}</button></div>`;
+  }).join('')}</div>` : '';
 }
 /** 停止运行：单飞锁保证一次只发一个取消请求；重复点击不再重复取消，也不重发写操作。 */
 async function stopRun(sid) {
@@ -655,7 +690,7 @@ async function send() {
   if (rt.embedded && !rt.keySet) { toast('请先配置 DeepSeek'); window.__pd_open_model?.('deepseek'); return; }
   if(!H.bots||H.botError){toast('请先重新读取机器人列表');return;}
   if (dsh.state !== 'online') { toast('对话尚未连接'); return; }
-  const content = [...(text ? [{ type: 'text', text }] : []), ...H.attach.map((a) => ({ type: 'image', mediaType: a.mediaType, data: a.data, name: a.name }))];
+  const content = [...(text ? [{ type: 'text', text }] : []), ...H.attach.map(a => a.handle ? {type:'file', ...a} : { type:'image', mediaType:a.mediaType, data:a.data, name:a.name })];
   const attach = H.attach, wasNew = !H.sel;
   const model = H.draftModels.get(origin);
   H.attach = []; H.attachmentDrafts.set(origin, H.attach);
@@ -686,7 +721,7 @@ async function send() {
         H.drafts[origin] = ''; H.attachmentDrafts.delete(origin);
       }
     }
-    const p = { sid, rpcId: uuid(), content, mode: dsh.running.has(sid) ? 'steer' : 'queue', text, t: Date.now() };
+    const p = { sid, botId: originBot, rpcId: uuid(), content, mode: dsh.running.has(sid) ? 'steer' : 'queue', text, t: Date.now() };
     H.pending.push(p);
     if (H.sel === sid) renderMsgs(true);
     await deliverPending(p);
@@ -706,15 +741,68 @@ async function send() {
 }
 async function deliverPending(p) {
   if (p.sending) return;
-  p.sending = true; p.error = ''; renderMsgsSoon();
+  p.sending = true; p.error = ''; p.cancelled = false; p.uploadIds = [];p.uploadAttempt=(p.uploadAttempt || 0)+1;renderMsgsSoon();
   try {
-    const result = await api.prompt(p.sid, p.content, p.mode, p.rpcId);
+    if (!p.wireContent) {
+      const wire = [];
+      p.uploadIds ||= [];
+      for (const [index, block] of p.content.entries()) {
+        if (block.type !== 'file') { wire.push(block); continue; }
+        if (!block.receiptId) {
+          const requestId = `${p.rpcId}:${p.uploadAttempt}:${index}`;
+          if (!p.uploadIds.includes(requestId)) p.uploadIds.push(requestId);
+          p.uploadText = `正在上传 ${block.name || '附件'}…`;renderMsgsSoon();
+          const uploaded = await native.uploadAttachment({handle:block.handle, botId:p.botId, sessionId:p.sid, requestId});
+          if (p.cancelled) throw Error('上传已取消');
+          block.receiptId = uploaded.receiptId; block.attachment = uploaded.file;
+        }
+        wire.push({type:'file',receiptId:block.receiptId});
+      }
+      p.wireContent = wire;
+    }
+    if (p.cancelled) throw Error('上传已取消');
+    p.uploadText = '';
+    const result = await api.prompt(p.sid, p.wireContent, p.mode, p.rpcId);
     if (result?.accepted !== true) throw new Error('发送尚未确认，请重试');
-  } catch (e) { p.error = e.message || '请重试'; }
+    releasePendingFiles(p);
+  } catch (e) {
+    if (e.code === 'session/attachment-invalid' && e.details?.reason === 'FILE_NOT_STAGED') {
+      p.wireContent = null;
+      for (const block of p.content) if (block.handle) {
+        delete block.receiptId;
+        await native.forgetAttachmentReceipt({handle:block.handle,sessionId:p.sid,botId:p.botId});
+      }
+      p.error = '附件暂存凭据已失效，请重试上传';
+    } else p.error = e.message || '请重试';
+  }
   finally {
     p.sending = false;
     if (p.echoed && !p.error) H.pending = H.pending.filter(x => x !== p);
     if (H.sel === p.sid) renderMsgsSoon();
+  }
+}
+function releasePendingFiles(p) {
+  if (p.filesReleased) return;
+  p.filesReleased = true;
+  for (const block of p.content) if (block.handle) native.removeAttachment(block.handle).catch(()=>{});
+}
+async function chooseFileDraft() {
+  const key = draftKey();
+  H.imageReading.set(key, (H.imageReading.get(key) || 0) + 1);updateInputRow();
+  try {
+    const selected = await native.chooseFiles();
+    const target = H.attachmentDrafts.get(key) || (draftKey() === key ? H.attach : []);
+    H.attachmentDrafts.set(key,target);
+    for (const file of selected || []) {
+      if (target.length >= 6) { await native.removeAttachment(file.handle);toast('最多添加 6 个附件');continue; }
+      target.push({type:'file',...file});
+    }
+    if (draftKey() === key) H.attach = target;
+  } catch (error) { toast(error.message || '文件选择失败'); }
+  finally {
+    const remaining = (H.imageReading.get(key) || 1) - 1;
+    if (remaining) H.imageReading.set(key,remaining);else H.imageReading.delete(key);
+    updateInputRow();
   }
 }
 async function onPick(e) {
@@ -726,7 +814,7 @@ async function onPick(e) {
   updateInputRow();
   try {
     for (const f of files) {
-      if (target.length >= 6) { toast('最多添加 6 张图片'); break; }
+      if (target.length >= 6) { toast('最多添加 6 个附件'); break; }
       const mt = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(f.type) ? f.type : null;
       if (!mt) { toast('仅支持 png / jpeg / webp / gif'); continue; }
       if (f.size > 8 * 1024 * 1024) { toast('图片超过 8MB'); continue; }
@@ -839,7 +927,7 @@ function onKey(e) {
   if (e.target.matches('.sfilter') && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); scheduleSearch(); return; }
   if (e.target.matches('.tool[data-tk]') && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.target.click(); return; }
   if (e.target.matches('textarea') && e.key === 'Enter' && !e.shiftKey && !e.isComposing && !('ontouchstart' in window)) { e.preventDefault(); send(); }
-  if (e.target.matches('.addr input') && e.key === 'Enter') { navigate(e.target.value.trim()); e.target.blur(); }
+
 }
 function onCtx(e) {
   const b=e.target.closest('[data-bot]');if(b){e.preventDefault();botMenuFor(b,b.dataset.bot);return;}
@@ -850,6 +938,12 @@ async function onClick(e) {
   if (questionClick(e)) return;
   const resend = t.closest('[data-resend]');
   if (resend) { const p = H.pending.find((p) => p.sid === H.sel && p.rpcId === resend.dataset.resend); if (p) deliverPending(p); return; }
+  const discard = t.closest('[data-discard]');
+  if (discard) {
+    const p=H.pending.find(value=>value.rpcId===discard.dataset.discard && value.sid===H.sel);
+    if (p && !p.sending) {releasePendingFiles(p);H.pending=H.pending.filter(value=>value!==p);renderMsgs();}
+    return;
+  }
   const botMenu=t.closest('[data-bot-menu]');if(botMenu){botMenuFor(botMenu,botMenu.dataset.botMenu);return;}
   const bot=t.closest('[data-bot]');if(bot){selectBot(bot.dataset.bot);return;}
   const tk = t.closest('.tool[data-tk]'); if (tk) { const k = tk.dataset.tk; H.openTools.has(k) ? H.openTools.delete(k) : H.openTools.add(k); renderMsgs(); return; }
@@ -863,6 +957,12 @@ async function onClick(e) {
       }
     }
     decideApproval(apv.dataset.apv, allow).catch((x) => toast(x.message)); return;
+  }
+  const cancelUpload = t.closest('[data-cancel-upload]');
+  if (cancelUpload) {
+    const p = H.pending.find(value=>value.rpcId===cancelUpload.dataset.cancelUpload);
+    if (p) { p.cancelled=true;for (const requestId of p.uploadIds || []) native.cancelAttachment(requestId).catch(()=>{}); }
+    return;
   }
   const copyCode = t.closest('.code-copy'); if (copyCode) {
     const code = copyCode.closest('.code-block')?.querySelector('pre code');
@@ -879,18 +979,38 @@ async function onClick(e) {
     }
     return;
   }
+  const imageRetry = t.closest('[data-image-retry]');
+  if (imageRetry) { readDurableAttachment(H.sel,{attachmentId:imageRetry.dataset.imageRetry},true);renderMsgs();return; }
   const inlineImage = t.closest('.chat-image[data-image]');
   if (inlineImage) {
     const src = inlineImage.querySelector('img')?.getAttribute('src') || '';
     if (isInlineImageSrc(src)) showImageSheet(src, inlineImage.dataset.imageTitle || '图片');
     return;
   }
+  const saveArt = t.closest('[data-art-save]');
+  if (saveArt) { native.openContent({path:saveArt.dataset.artSave,botId:H.botId,sessionId:H.sel,download:true}).then(v=>toast(v.displayPath || '已保存')).catch(x=>toast(x.message));return; }
   const art = t.closest('[data-art]'); if (art) { if(H.inspector){H.inspector=false;SV('inspector',false);el.classList.remove('bot-detail-open');} openArtifact(art.dataset.art); return; }
   const fl = t.closest('code.fl'); if (fl) { openArtifact(expandHome(fl.dataset.file)); return; }
-  const a = t.closest('a[data-href]'); if (a) { const u = a.dataset.href; if (/^https?:/.test(u)) openUrl(u); else openArtifact(expandHome(resolvePath(u, H.conv?.header?.cwd))); return; }
-  const rm = t.closest('[data-rm]'); if (rm) { H.attach.splice(+rm.dataset.rm, 1); updateInputRow(); return; }
-  const tab = t.closest('.tab[data-tab]');
-  if (tab) { if (t.closest('.x')) closeTab(tab.dataset.tab); else { H.active = tab.dataset.tab; SV('active', H.active); renderBrowser(); } return; }
+  const a = t.closest('a[data-href]'); if (a) { e.preventDefault(); const u = a.dataset.href; if (/^https?:/i.test(u)) openUrl(u); else openArtifact(expandHome(resolvePath(u, H.conv?.header?.cwd))); return; }
+  const preview = t.closest('[data-draft-preview]');
+  if (preview) {
+    const item = H.attach[+preview.dataset.draftPreview];
+    const src = inlineImageSrc(item);
+    if (src) showImageSheet(src, item.name || '图片');
+    else if (item?.handle) native.openContent({handle:item.handle, name:item.name, kind:item.kind, botId:H.botId, sessionId:H.sel}).catch(x=>toast(x.message));
+    return;
+  }
+  const file = t.closest('[data-file-open], [data-file-save]');
+  if (file) {
+    const args = {sessionId:H.sel, botId:H.botId, ...(file.dataset.fileHandle ? {handle:file.dataset.fileHandle} : {attachmentId:file.dataset.attachmentId}), name:file.dataset.fileName, download:file.hasAttribute('data-file-save')};
+    native.openContent(args).then(value=>{if(value?.displayPath)toast(`已保存：${value.displayPath}`);}).catch(x=>toast(x.message));
+    return;
+  }
+  const rm = t.closest('[data-rm]'); if (rm) {
+    const [removed] = H.attach.splice(+rm.dataset.rm, 1);
+    if (removed?.handle) native.removeAttachment(removed.handle).catch(x=>toast(x.message));
+    updateInputRow(); return;
+  }
   const act = t.closest('[data-act]'); if (!act) return;
   const A = act.dataset.act;
   switch (A) {
@@ -911,7 +1031,10 @@ async function onClick(e) {
       break;
     case 'more': moreMenu(act); break;
     case 'model': modelMenu(act); break;
-    case 'plus': menu(act, [{ label: '添加图片', icon: S.img, act: () => { H.pickKey = draftKey(); document.getElementById('filepick').click(); } }, { label: '插入 /compact（压缩上下文）', icon: S.term, act: () => H.sel && api.command(H.sel, '/compact').then(() => toast('已执行 /compact')).catch((x) => toast(x.message)) }]); break;
+    case 'plus': menu(act, [
+      {label:'图片',icon:S.img,act:()=>{H.pickKey=draftKey();document.getElementById('filepick').click();}},
+      {label:'文件',icon:S.clip,act:()=>void chooseFileDraft()},
+    ]); break;
     case 'send': send(); break;
     case 'stop': void stopRun(H.sel); break;
     case 'openDshbox': native.openDshbox().then((ok) => ok === false && toast('未安装 DSHBox')); break;
@@ -922,102 +1045,36 @@ async function onClick(e) {
     case 'rtRetry': retryRt().catch((e) => toast(e.message)); renderMsgs(); renderBanner(); break;
     case 'paste': promptSheet({ title: '粘贴 DSHBox 启动链接', label: '启动链接或令牌', placeholder: 'http://127.0.0.1:3080/?token=…', ok: '配对', note: '在 DSHBox 里点「用外部浏览器打开」，选择「复制链接」或任意浏览器，再把带 ?token= 的地址粘贴到这里。' }).then((v) => v && pair(v)); break;
     case 'toNative': await native.setConfig({ harnessMode: 'native' }); await refreshMode(); startDsh(); break;
-    case 'back': browserCmd('back'); break;
-    case 'fwd': browserCmd('fwd'); break;
-    case 'reload': browserCmd('reload'); break;
-    case 'newtab': openTab('about:blank', '新标签页'); setTimeout(() => el.querySelector('.addr input')?.focus(), 50); break;
-    case 'expand': H.expand = !H.expand; build(); break;
-    case 'extopen': { const tb = H.tabs.find((x) => x.id === H.active); if (tb && /^https?:/.test(tb.url) && !fileFromUrl(tb.url)) native.openExternal(tb.url); break; }
     default: break;
   }
 }
 
-function showImageSheet(src, title = '图片') {
-  if (!isInlineImageSrc(src)) return;
-  sheet({ title, full: true, body: `<img class="chat-image-view" src="${esc(src)}" alt="${esc(title)}">` });
+function showImageSheet(src, title = '图片', source = null) {
+  if (!isInlineImageSrc(src) && !fileFromUrl(src)) return;
+  const saveSource = source || (isInlineImageSrc(src) ? {dataUrl:src,name:title} : null);
+  sheet({title,full:true,body:`<img class="chat-image-view" src="${esc(src)}" alt="${esc(title)}">${saveSource ? '<button type="button" class="btn" id="save-chat-image">保存图片</button>' : ''}`});
+  document.getElementById('save-chat-image')?.addEventListener('click',()=>native.openContent({...saveSource,download:true}).then(v=>toast(v.displayPath || '已保存')).catch(x=>toast(x.message)));
 }
 
-/* ============================================================ 内置浏览器 */
-const FAV = ['#4d6bfe', '#14161b', '#2f9e5b', '#e48a1c', '#8a5cf6', '#e8e8ec'];
-function displayUrl(u) { const f = fileFromUrl(u); return f ? 'file://' + f : u === 'about:blank' ? '' : u; }
+
+/* All document and site navigation goes through the shared native content surface. */
 function openArtifact(path) {
   if (!path) return;
-  if (path.startsWith('file://')) path = path.slice(7);
-  openTab(fileUrl(path), basename(path));
-  if (cover) { H.pendingInner = true; toast('已加入预览，展开内屏即可查看'); }
+  path = path.startsWith('file://') ? path.slice(7) : path;
+  if (/\.(png|jpe?g|webp|gif)$/i.test(path)) { showImageSheet(fileUrl(path), basename(path), {path,botId:H.botId,sessionId:H.sel}); return; }
+  if (H.inspector) { H.inspector=false;SV('inspector',false);el.classList.remove('bot-detail-open'); }
+  native.openContent({path,botId:H.botId,sessionId:H.sel,title:basename(path)}).catch(x=>toast(x.message));
 }
-function openUrl(u) { openTab(u, u.replace(/^https?:\/\//, '')); if (cover) { H.pendingInner = true; toast('已加入预览，展开内屏即可查看'); } }
-function navigate(input) {
-  if (!input) return;
-  let u = input;
-  if (u.startsWith('file://')) u = fileUrl(u.slice(7));
-  else if (u.startsWith('/')) u = fileUrl(u);
-  else if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/.test(u)) u = 'http://' + u;
-  else if (!/^[a-z]+:/i.test(u)) u = (/\.\w{2,}(\/|$)/.test(u) ? 'https://' : 'https://www.bing.com/search?q=') + (/\.\w{2,}(\/|$)/.test(u) ? u : encodeURIComponent(u));
-  const tb = H.tabs.find((x) => x.id === H.active);
-  if (tb) { tb.url = u; tb.title = displayUrl(u); saveTabs(); browserCmd('navigate'); renderBrowser(); } else openTab(u, displayUrl(u));
-}
-function openTab(url, title) {
-  // File cards, links and code paths all reveal the same preview surface.
-  if (H.inspector) { H.inspector = false; SV('inspector', false); renderHead(); }
-
-  let tb = H.tabs.find((x) => x.url === url);
-  if (!tb) { tb = { id: uuid().slice(0, 8), url, title: title || url, fav: fileFromUrl(url) ? '#14161b' : FAV[H.tabs.length % FAV.length] }; H.tabs.push(tb); if (H.tabs.length > 8) H.tabs.shift(); }
-  H.active = tb.id; saveTabs();
-  const rebuild = !cover && el.classList.contains('nobrowser');
-  // 已有侧栏只改变聊天宽度：先记锚点，变宽后立即恢复，不等待下一帧。
-  if (!rebuild) chatScroll?.remember();
-  applyWidths();
-  if (rebuild) build(); else { renderBrowser(); chatScroll?.refresh(); }
-  requestAnimationFrame(syncOverlays);
-}
-function closeTab(id) { const i = H.tabs.findIndex((x) => x.id === id); if (i < 0) return; H.tabs.splice(i, 1); if (H.active === id) H.active = H.tabs[Math.max(0, i - 1)]?.id || null; saveTabs(); if (!H.tabs.length) { H.expand = false; build(); } else renderBrowser(); }
-function saveTabs() { SV('tabs', H.tabs); SV('active', H.active); }
-function browserCmd(cmd) { native.browser({ ...overlayState(), cmd }); }
-function onBrowserEvent(v) {
-  const tb = H.tabs.find((x) => x.id === v.tabId); if (!tb) return;
-  H.meta[v.tabId] = { ...(H.meta[v.tabId] || {}), ...v };
-  if (v.url && v.url !== 'about:blank') tb.url = v.url;
-  if (v.title && !/^https?:\/\/|^file:/.test(v.title)) tb.title = v.title;
-  saveTabs(); renderBrowserChrome();
-}
-function renderBrowser() { renderBrowserChrome(); syncOverlays(); }
-function renderBrowserChrome() {
-  const tabs = el?.querySelector('.br .tabs'); if (!tabs) return;
-  if (!H.tabs.find((x) => x.id === H.active)) H.active = H.tabs[0]?.id || null;
-  const previousActive = tabs.dataset.active, previousScroll = tabs.scrollLeft;
-  tabs.innerHTML = H.tabs.map((t) => `<div class="tab${t.id === H.active ? ' on' : ''}" data-tab="${esc(t.id)}"><i class="fav" style="background:${t.fav}"></i><span>${esc(t.title || displayUrl(t.url))}</span><button type="button" class="x" aria-label="关闭文件预览">${S.x}</button></div>`).join('') + `<div style="padding:0 6px 6px;color:#777;cursor:pointer;display:flex;flex:none" data-act="newtab">${S.plus}</div>`;
-  tabs.scrollLeft = previousScroll;
-  if (previousActive !== (H.active || '')) {
-    const activeTab = tabs.querySelector('.tab.on');
-    if (activeTab) {
-      const target = activeTab.getBoundingClientRect(), viewport = tabs.getBoundingClientRect();
-      if (target.left < viewport.left) tabs.scrollLeft -= viewport.left - target.left;
-      else if (target.right > viewport.right) tabs.scrollLeft += target.right - viewport.right;
-    }
-  }
-  tabs.dataset.active = H.active || '';
-  const tb = H.tabs.find((x) => x.id === H.active); const meta = (tb && H.meta[tb.id]) || {};
-  const u = tb ? displayUrl(tb.url) : '';
-  const icon = u.startsWith('file://') ? S.file : /^https:/.test(u) ? S.lock : S.globe;
-  el.querySelector('.br .bbar').innerHTML = `<span class="nb${meta.canBack ? '' : ' dis'}" data-act="back">${S.back}</span><span class="nb${meta.canFwd ? '' : ' dis'}" data-act="fwd">${S.fwd}</span><span class="nb" data-act="reload">${S.reload}</span><div class="addr">${icon}<input value="${esc(u)}" placeholder="输入网址、localhost:端口 或 /文件路径" spellcheck="false" autocapitalize="off"></div><span class="nb" data-act="expand" title="${H.expand ? '还原' : '展开'}">${S.expand}</span>`;
-  const pr = el.querySelector('.bprog'); if (pr) { const p = meta.loading ? Math.max(10, meta.progress || 0) : 0; pr.style.width = p ? p + '%' : '0'; }
-  const em = el.querySelector('.bview .empty'); if (em) em.innerHTML = tb ? '' : `${S.web.replace('width:14px;height:14px', 'width:28px;height:28px')}<div>产物和本地开发服务会在这里打开<br><span style="color:#b0b0b6">例如 output/report.html、localhost:5173</span></div>`;
-}
-function overlayState() {
-  const v = el?.querySelector('.bview');
-  const visible = !!(el && el.classList.contains('on') && v && v.offsetWidth && H.mode === 'native' && !cover && document.getElementById('sheet').classList.contains('on') === false);
-  const r = v ? v.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
-  return { visible, rect: { x: r.left, y: r.top, w: r.width, h: r.height }, tabs: H.tabs.map((t) => ({ id: t.id, url: t.url })), active: H.active };
+function openUrl(url) {
+  native.openContent({url,title:url}).catch(x=>toast(x.message));
 }
 export function syncOverlays() {
   if (!el) return;
-  native.browser(overlayState());
   const vp = el.querySelector('.dshweb .vp');
   const r = vp ? vp.getBoundingClientRect() : null;
-  native.dshWeb({ visible: !!(vp && el.classList.contains('on') && H.mode === 'web' && !document.getElementById('sheet').classList.contains('on')), rect: r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null });
+  native.dshWeb({visible:!!(vp && el.classList.contains('on') && H.mode==='web' && !document.getElementById('sheet').classList.contains('on')),rect:r?{x:r.left,y:r.top,w:r.width,h:r.height}:null});
 }
-window.addEventListener('resize', () => requestAnimationFrame(syncOverlays));
+window.addEventListener('resize',()=>requestAnimationFrame(syncOverlays));
 
 /* ============================================================ 分栏拖拽（内屏） */
 function applyWidths() {
@@ -1043,13 +1100,13 @@ document.addEventListener('pointermove', (e) => {
 document.addEventListener('pointerup', () => { if (!drag) return; const total = el.getBoundingClientRect().width; SV('widths', { side: (el.querySelector('.side').getBoundingClientRect().width / total) * 100, chat: (el.querySelector('.chat').getBoundingClientRect().width / total) * 100 }); drag = null; });
 
 /** 开发/截图钩子 */
-export const dev = { selectBot, select: (sid) => select(sid), openArtifact: (p) => openArtifact(p), openUrl: (u) => openUrl(u), activate: (i) => { H.active = H.tabs[i]?.id; saveTabs(); renderBrowser(); }, H };
+export const dev = {selectBot,select:(sid)=>select(sid),openArtifact,openUrl,H};
 
 /** 返回键：浏览器后退 > 关闭展开 > 交给上层 */
 export function back() {
   if(H.inspector){H.inspector=false;SV('inspector',false);renderHead();syncOverlays();return true;}
   if(cover&&H.mobileChat){H.mobileChat=false;el.classList.remove('mobile-chat');return true;}
-  if (H.expand) { H.expand = false; build(); return true; }
+
   if (cover && H.noside) { H.noside = false; SV('noside', false); build(); return true; }
   return false;
 }

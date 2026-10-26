@@ -46,12 +46,21 @@ class MainActivity : ComponentActivity() {
     val paneOffsetX
         get() = (NAV_RAIL_WIDTH_DP * resources.displayMetrics.density).toInt()
 
+    internal val hostUi=PluginHostUi(this)
+    private var pendingSharedIntent: Intent?=null
     private var pageReady = false
     private var pendingCoreRoute: String? = null
     private lateinit var pluginShell: PluginShell
 
     fun openPlugin(id: String) {
         pluginShell.open(id)
+    }
+
+    fun showSharedBot(id: String,text: String,uris: List<Uri>){
+        showCore("harness")
+        Thread({val staged=runCatching{botAttachments.stage(uris)}.getOrDefault(org.json.JSONArray())
+            runOnUiThread{emit("shareDraft",JSONObject().put("botId",id).put("text",text).put("files",staged))}
+        },"bot-share-import").start()
     }
 
     fun openPluginManager() {
@@ -63,6 +72,32 @@ class MainActivity : ComponentActivity() {
     private var lastInsets = JSONObject()
     private var siteBrowserInsets = intArrayOf(0, 0, 0, 0)
     private var fileCb: ValueCallback<Array<Uri>>? = null
+    internal val botAttachments by lazy { BotAttachmentTransfer(this, cfg) { botId, sessionId -> requireBotSession(botId, sessionId) } }
+    private var botFileCallback: ((List<Uri>) -> Unit)? = null
+    private val pickBotFiles = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        val callback = botFileCallback
+        botFileCallback = null
+        callback?.invoke(uris)
+    }
+
+    fun chooseBotFiles(callback: (List<Uri>) -> Unit) {
+        check(botFileCallback == null) { "文件选择器已打开" }
+        botFileCallback = callback
+        try { pickBotFiles.launch("*/*") }
+        catch (error: Exception) { botFileCallback = null;throw error }
+    }
+
+    /** Validate the native receiver before uploads and before resolving a chat file. */
+    internal fun requireBotSession(botId: String, sessionId: String?): String {
+        val bots = BotWorkspaces.get(this).call(JSONObject().put("op", "list")).getJSONArray("bots")
+        val bot = (0 until bots.length()).map { bots.getJSONObject(it) }.firstOrNull { it.getString("id") == botId }
+            ?: error("Bot 已不存在")
+        if (sessionId != null) {
+            val sessions = bot.getJSONArray("sessionIds")
+            check((0 until sessions.length()).any { sessions.getString(it) == sessionId } || bot.optString("selectedSessionId") == sessionId) { "会话不属于此 Bot" }
+        }
+        return bot.getString("workspace")
+    }
 
     private val pickFiles =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
@@ -88,6 +123,13 @@ class MainActivity : ComponentActivity() {
             pluginImageCallback = null
             callback?.invoke(uris)
         }
+
+    fun choosePluginFiles(params: WebChromeClient.FileChooserParams,callback: (List<Uri>) -> Unit){
+        check(pluginImageCallback==null){"文件选择器已打开"}
+        pluginImageCallback=callback
+        try { val types=params.acceptTypes.filter{it.isNotBlank()};pickPluginImages.launch(if(types.size==1)types.first() else "*/*") }
+        catch(_:ActivityNotFoundException){pluginImageCallback=null;callback(emptyList())}
+    }
 
     fun choosePluginImages(callback: (List<Uri>) -> Unit) {
         pluginImageCallback = callback
@@ -211,6 +253,7 @@ class MainActivity : ComponentActivity() {
         Thread(
                 {
                     runCatching {
+                        PluginTransfers.recover(applicationContext)
                         PluginPlatform.recoverPendingRemovals(applicationContext)
                         val sync = PluginBackground.reconcile(applicationContext)
                         if (sync.optInt("errors") > 0)
@@ -283,7 +326,7 @@ class MainActivity : ComponentActivity() {
                     req: WebResourceRequest,
                 ): Boolean {
                     if (req.url.host == APP_HOST) return false
-                    openExternal(req.url.toString())
+                    if (req.hasGesture()) openInApp(req.url.toString())
                     return true // 主界面永不离开本地资源
                 }
 
@@ -335,6 +378,11 @@ class MainActivity : ComponentActivity() {
 
     /** DSHBox 的「用外部浏览器打开」→ 选择本应用 → 自动配对 */
     private fun handleIntent(i: Intent?) {
+        if(i!=null&&i.action in setOf(Intent.ACTION_SEND,Intent.ACTION_SEND_MULTIPLE)){
+            if(pageReady)PluginShareInbox.receive(this,i) else pendingSharedIntent=i
+            return
+        }
+        if(i?.data?.let { PluginConnections.callback(this,it) }==true)return
         if (i?.action == "com.personaldashboard.app.OPEN_PLUGIN") {
             val id =
                 runCatching { PluginContract.id(i.getStringExtra("pluginId").orEmpty()) }
@@ -380,48 +428,8 @@ class MainActivity : ComponentActivity() {
     }
 
     fun showLicenses() {
-        val dialog =
-            android.app.AlertDialog.Builder(this)
-                .setTitle("开源许可证")
-                .setPositiveButton("关闭", null)
-                .create()
-        val licenseView =
-            WebView(this).apply {
-                settings.javaScriptEnabled = false
-                settings.allowFileAccess = false
-                settings.allowContentAccess = false
-                webViewClient =
-                    object : WebViewClient() {
-                        override fun onRenderProcessGone(
-                            view: WebView,
-                            detail: RenderProcessGoneDetail,
-                        ): Boolean {
-                            dialog.dismiss()
-                            return true
-                        }
-
-                        override fun shouldOverrideUrlLoading(
-                            view: WebView,
-                            request: WebResourceRequest,
-                        ): Boolean {
-                            if (request.url.scheme == "https") openExternal(request.url.toString())
-                            return true
-                        }
-                    }
-                loadDataWithBaseURL(
-                    "https://licenses.pd.local/",
-                    assets.open("third-party-notices.html").bufferedReader().use { it.readText() },
-                    "text/html",
-                    "UTF-8",
-                    null,
-                )
-            }
-        dialog.setView(licenseView)
-        dialog.setOnDismissListener {
-            (licenseView.parent as? android.view.ViewGroup)?.removeView(licenseView)
-            licenseView.destroy()
-        }
-        dialog.show()
+        val notice = assets.open("third-party-notices.html").bufferedReader().use { it.readText() }
+        FilePreviewDialog(this).show(FileTextContent("text/html", "开源许可证", notice, notice.toByteArray().size))
     }
 
     private fun showCore(tab: String) {
@@ -442,6 +450,7 @@ class MainActivity : ComponentActivity() {
         val requestedRoute = pendingCoreRoute
         pendingCoreRoute = null
         pluginShell.ready()
+        pendingSharedIntent?.let { shared -> pendingSharedIntent=null;root.post {PluginShareInbox.receive(this,shared)} }
         if (requestedRoute != null && coreVisible) showCore(requestedRoute)
         emit("insets", lastInsets)
         emit("runtime", Runtime.status(this))
@@ -483,6 +492,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        hostUi.close()
         PluginSiteBrowserHost.onDestroy(this)
         PluginNotificationPermission.onDestroy(this)
         PluginPreviewManager.detachIfOwner(this)
@@ -492,6 +502,9 @@ class MainActivity : ComponentActivity() {
         fileCb = null
         pluginImageCallback?.invoke(emptyList())
         pluginImageCallback = null
+        botFileCallback?.invoke(emptyList())
+        botFileCallback = null
+        botAttachments.close()
         Runtime.removeListener(rtListener)
         AppControl.removeListener(appSettingsListener)
         PluginPlatform.removeListener(pluginListener)
@@ -556,6 +569,16 @@ class MainActivity : ComponentActivity() {
                 if (::pluginShell.isInitialized) pluginShell.emit(ch, v)
             }
         }
+    }
+
+    fun openInApp(url: String): Boolean {
+        if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) return openExternal(url)
+        return try {
+            PluginSiteBrowserHost.openCore(this, "core-links", JSONObject().put("url", url), { result ->
+                if (!result.optBoolean("opened")) Toast.makeText(this, result.optString("reason", "网页未打开"), Toast.LENGTH_LONG).show()
+            })
+            true
+        } catch (_: Exception) { Toast.makeText(this, "链接无效", Toast.LENGTH_SHORT).show();false }
     }
 
     fun openExternal(url: String): Boolean {

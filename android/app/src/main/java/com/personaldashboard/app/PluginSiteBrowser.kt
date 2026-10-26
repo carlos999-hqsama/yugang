@@ -24,6 +24,7 @@ import androidx.webkit.WebStorageCompat
 import androidx.webkit.WebViewFeature
 import java.io.ByteArrayInputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -33,18 +34,22 @@ import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONObject
 
 /**
- * A real, isolated WebView for one installed plugin.
+ * A real, isolated WebView for an installed plugin, Core page, or controlled document.
  *
- * This class never adds a JavaScript bridge. The host owns the only open entry point and its
- * [HostGestureAdmission] implementation must derive admission from a recent real UI gesture.
+ * This class never adds a JavaScript bridge. Plugin opens require [HostGestureAdmission]; Core and
+ * document opens are separate native entry points with their own profiles and URL policies.
  */
 class PluginSiteBrowser private constructor(
     private val appContext: Context,
     val view: WebView,
     private val profile: Profile,
+    private val mode: Mode,
+    private val documentResource: ((WebResourceRequest) -> WebResourceResponse?)?,
     private val listener: Listener,
     private val startUrl: String,
 ) {
+    private enum class Mode { PLUGIN, CORE, DOCUMENT }
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private val lastCommittedUrl = AtomicReference(startUrl)
     private val opened = AtomicBoolean(false)
@@ -66,13 +71,13 @@ class PluginSiteBrowser private constructor(
     }
 
     interface Listener {
-        /** Exactly once, after the WebView is destroyed. Contains only opened/closed/finalUrl. */
+        /** Exactly once after destruction. Document handoff also contains openCoreUrl. */
         fun onClosed(receipt: JSONObject)
 
-        /** A profile-authenticated download finished at a fixed MediaStore location. */
+        /** A browser download finished at a fixed MediaStore location. */
         fun onDownload(receipt: JSONObject) {}
 
-        /** A navigation was refused because it was not HTTP(S). No target URL is echoed. */
+        /** A navigation was refused by scheme or origin policy. No target URL is echoed. */
         fun onBlocked(reason: String) {}
 
         /** Host chrome-only navigation metadata. The plugin receipt still contains only close data. */
@@ -116,12 +121,26 @@ class PluginSiteBrowser private constructor(
     }
 
     fun close() {
+        closeInternal(null)
+    }
+
+    private fun closeInternal(externalUrl: String?) {
         if (!closed.compareAndSet(false, true)) return
         synchronized(cookieWriteLock) { /* Drain native cookie writes before profile cleanup. */ }
         downloadExecutor?.shutdownNow()
         mainHandler.post {
             val receipt =
-                PluginSiteBrowserPolicy.closeReceipt(opened.get(), if (rendererGone) lastCommittedUrl.get() else currentUrl())
+                if (externalUrl == null)
+                    PluginSiteBrowserPolicy.closeReceipt(
+                        opened.get(),
+                        if (rendererGone) lastCommittedUrl.get() else currentUrl(),
+                    )
+                else
+                    PluginSiteBrowserPolicy.documentHandoffReceipt(
+                        opened.get(),
+                        lastCommittedUrl.get(),
+                        externalUrl,
+                    )
             try {
                 if (!rendererGone) view.stopLoading()
                 (view.parent as? ViewGroup)?.removeView(view)
@@ -141,18 +160,25 @@ class PluginSiteBrowser private constructor(
 
     fun currentUrl(): String =
         if (closed.get() || rendererGone) lastCommittedUrl.get() else try {
-            PluginSiteBrowserPolicy.url(view.url)
+            acceptedUrl(view.url)
         } catch (_: IllegalArgumentException) {
             lastCommittedUrl.get()
         }
 
     private fun rememberCommittedUrl(raw: String?) {
         try {
-            lastCommittedUrl.set(PluginSiteBrowserPolicy.url(raw))
+            lastCommittedUrl.set(acceptedUrl(raw))
         } catch (_: IllegalArgumentException) {
-            // Preserve the last legal HTTP(S) commit; rejected schemes never become finalUrl.
+            // Preserve the last legal commit; rejected schemes and origins never become finalUrl.
         }
     }
+
+    private fun acceptedUrl(raw: String?): String =
+        when (mode) {
+            Mode.PLUGIN -> PluginSiteBrowserPolicy.url(raw)
+            Mode.CORE -> PluginSiteBrowserPolicy.coreUrl(raw)
+            Mode.DOCUMENT -> PluginSiteBrowserPolicy.documentResourceUrl(raw)
+        }
 
     private fun blocked(reason: String) {
         mainHandler.post {
@@ -194,25 +220,52 @@ class PluginSiteBrowser private constructor(
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
                     request: WebResourceRequest,
-                ): Boolean =
+                ): Boolean {
                     try {
-                        PluginSiteBrowserPolicy.url(request.url.toString())
-                        false
+                        if (mode == Mode.DOCUMENT) {
+                            val external =
+                                PluginSiteBrowserPolicy.documentHandoffUrl(
+                                    request.url.toString(),
+                                    request.isForMainFrame,
+                                    request.hasGesture(),
+                                    request.method,
+                                )
+                            if (external != null) {
+                                closeInternal(external)
+                                return true
+                            }
+                        }
+                        acceptedUrl(request.url.toString())
                     } catch (error: IllegalArgumentException) {
                         blocked(error.message ?: "站内浏览器仅支持 HTTP(S) 链接")
-                        true
+                        return true
                     }
+                    return false
+                }
 
                 override fun shouldInterceptRequest(
                     view: WebView,
                     request: WebResourceRequest,
-                ): WebResourceResponse? =
-                    try {
-                        PluginSiteBrowserPolicy.url(request.url.toString())
-                        null
-                    } catch (_: IllegalArgumentException) {
+                ): WebResourceResponse? {
+                    if (closed.get()) return refusedResource()
+                    return try {
+                        when (mode) {
+                            Mode.DOCUMENT -> {
+                                if (PluginSiteBrowserPolicy.documentNetworkResource(request.url.toString(), request.isForMainFrame)) return null
+                                PluginSiteBrowserPolicy.documentResourceUrl(request.url.toString())
+                                if (closed.get()) refusedResource()
+                                else documentResource?.invoke(request) ?: refusedResource()
+                            }
+                            else -> {
+                                acceptedUrl(request.url.toString())
+                                null
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // A missing or refused controlled resource must never fall through to network.
                         refusedResource()
                     }
+                }
 
                 override fun onPageStarted(
                     view: WebView,
@@ -289,12 +342,13 @@ class PluginSiteBrowser private constructor(
     ) {
         val url =
             try {
-                PluginSiteBrowserPolicy.url(rawUrl)
+                acceptedUrl(rawUrl)
             } catch (_: IllegalArgumentException) {
-                blocked("下载地址必须是 HTTP(S) 链接")
+                blocked(if (mode == Mode.DOCUMENT) "文档下载仅限受控同源地址" else "下载地址必须是 HTTP(S) 链接")
                 return
             }
 
+        val referer = if (mode == Mode.DOCUMENT) lastCommittedUrl.get() else null
         val executor =
             downloadExecutor
                 ?: Executors.newSingleThreadExecutor { runnable ->
@@ -303,7 +357,14 @@ class PluginSiteBrowser private constructor(
 
         executor.execute {
             if (!Thread.currentThread().isInterrupted) {
-                val result = download(url, userAgent, contentDisposition, mimeType)
+                val result =
+                    download(
+                        url,
+                        userAgent,
+                        referer,
+                        contentDisposition,
+                        mimeType,
+                    )
                 mainHandler.post {
                     if (!closed.get()) listener.onDownload(result)
                 }
@@ -314,12 +375,15 @@ class PluginSiteBrowser private constructor(
     private fun download(
         startUrl: String,
         userAgent: String?,
+        referer: String?,
         contentDisposition: String?,
         advertisedMime: String?,
     ): JSONObject =
         try {
-            val connection = openDownloadConnection(startUrl, userAgent)
-            val bytes = copyToMediaStore(connection, contentDisposition, advertisedMime)
+            val bytes =
+                if (mode == Mode.DOCUMENT)
+                    copyDocumentToMediaStore(startUrl, userAgent, referer, contentDisposition, advertisedMime)
+                else copyNetworkToMediaStore(startUrl, userAgent, contentDisposition, advertisedMime)
             DownloadedFiles.receipt(
                 appContext,
                 bytes.first,
@@ -338,6 +402,74 @@ class PluginSiteBrowser private constructor(
         val size: Long,
     )
 
+    private fun copyNetworkToMediaStore(
+        startUrl: String,
+        userAgent: String?,
+        contentDisposition: String?,
+        advertisedMime: String?,
+    ): Triple<Uri, String, DownloadTarget> {
+        val (connection, finalUrl) = openDownloadConnection(startUrl, userAgent)
+        return try {
+            copyToMediaStore(
+                finalUrl = finalUrl,
+                responseMime = connection.contentType,
+                contentLength = connection.getHeaderField("Content-Length"),
+                contentDisposition = contentDisposition,
+                advertisedMime = advertisedMime,
+                input = connection.inputStream,
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun copyDocumentToMediaStore(
+        finalUrl: String,
+        userAgent: String?,
+        referer: String?,
+        contentDisposition: String?,
+        advertisedMime: String?,
+    ): Triple<Uri, String, DownloadTarget> {
+        if (closed.get()) throw IOException("下载已取消")
+        val headers = mutableMapOf<String, String>()
+        safeHeaderValue(userAgent)?.let { headers["User-Agent"] = it }
+        safeHeaderValue(referer)?.let { value ->
+            runCatching { PluginSiteBrowserPolicy.documentResourceUrl(value) }.getOrNull()
+                ?.let { headers["Referer"] = it }
+        }
+        val request =
+            object : WebResourceRequest {
+                override fun getUrl(): Uri = Uri.parse(finalUrl)
+                override fun isForMainFrame(): Boolean = false
+                override fun isRedirect(): Boolean = false
+                override fun hasGesture(): Boolean = false
+                override fun getMethod(): String = "GET"
+                override fun getRequestHeaders(): MutableMap<String, String> = headers
+            }
+        val response =
+            requireNotNull(documentResource).invoke(request)
+                ?: throw IOException("文档下载资源不可用")
+        if (response.statusCode !in 200..299) {
+            response.data.close()
+            throw IOException("文档下载资源不可用")
+        }
+        return copyToMediaStore(
+            finalUrl = finalUrl,
+            responseMime = response.mimeType,
+            contentLength = responseHeader(response, "Content-Length"),
+            contentDisposition =
+                contentDisposition?.takeIf { it.isNotBlank() }
+                    ?: responseHeader(response, "Content-Disposition"),
+            advertisedMime = advertisedMime,
+            input = response.data,
+        )
+    }
+
+    private fun responseHeader(response: WebResourceResponse, name: String): String? =
+        response.responseHeaders?.entries
+            ?.firstOrNull { it.key.equals(name, true) }
+            ?.value
+
     private fun openDownloadConnection(
         startUrl: String,
         userAgent: String?,
@@ -347,7 +479,7 @@ class PluginSiteBrowser private constructor(
 
         while (true) {
             if (Thread.currentThread().isInterrupted) throw IOException("下载已取消")
-            val url = PluginSiteBrowserPolicy.url(current)
+            val url = acceptedUrl(current)
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.instanceFollowRedirects = false
@@ -387,19 +519,20 @@ class PluginSiteBrowser private constructor(
     }
 
     private fun copyToMediaStore(
-        opened: Pair<HttpURLConnection, String>,
+        finalUrl: String,
+        responseMime: String?,
+        contentLength: String?,
         contentDisposition: String?,
         advertisedMime: String?,
+        input: InputStream,
     ): Triple<Uri, String, DownloadTarget> {
-        val (connection, finalUrl) = opened
         var pendingUri: Uri? = null
         try {
-            val responseMime = connection.contentType?.substringBefore(';')?.trim().orEmpty()
-            val mime = responseMime.ifBlank { advertisedMime.orEmpty() }
+            val cleanResponseMime = responseMime?.substringBefore(';')?.trim().orEmpty()
+            val mime = cleanResponseMime.ifBlank { advertisedMime.orEmpty() }
                 .ifBlank { "application/octet-stream" }
             var name = PluginSiteBrowserPolicy.downloadName(contentDisposition, finalUrl)
-            val contentLength =
-                PluginSiteBrowserPolicy.contentLength(connection.getHeaderField("Content-Length"))
+            val boundedContentLength = PluginSiteBrowserPolicy.contentLength(contentLength)
             val extension = PluginSiteBrowserPolicy.extension(mime)
             if (extension.isNotEmpty() && !name.substringAfterLast('.', "").equals(extension, true)) {
                 name += ".$extension"
@@ -418,16 +551,16 @@ class PluginSiteBrowser private constructor(
 
             var size = 0L
             resolver.openOutputStream(pendingUri, "w")?.use { output ->
-                connection.inputStream.use { input ->
+                input.use {
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         if (Thread.currentThread().isInterrupted || closed.get()) throw IOException("下载已取消")
-                        val read = input.read(buffer)
+                        val read = it.read(buffer)
                         if (read < 0) break
                         if (Thread.currentThread().isInterrupted || closed.get()) throw IOException("下载已取消")
                         val nextSize =
                             PluginSiteBrowserPolicy.downloadSize(
-                                contentLength,
+                                boundedContentLength,
                                 size + read.toLong(),
                             )
                         output.write(buffer, 0, read)
@@ -435,7 +568,7 @@ class PluginSiteBrowser private constructor(
                     }
                 }
                 output.flush()
-                PluginSiteBrowserPolicy.downloadSize(contentLength, size)
+                PluginSiteBrowserPolicy.downloadSize(boundedContentLength, size)
             } ?: throw IOException("无法写入下载文件")
 
             val finished =
@@ -452,8 +585,6 @@ class PluginSiteBrowser private constructor(
         } catch (error: Exception) {
             pendingUri?.let { appContext.contentResolver.delete(it, null, null) }
             throw error
-        } finally {
-            connection.disconnect()
         }
     }
 
@@ -501,7 +632,61 @@ class PluginSiteBrowser private constructor(
             check(isSupported()) { "当前 WebView 不支持插件独立浏览器 profile" }
             check(admission.admit(pluginId, url)) { "站内浏览器需要用户真实触控确认" }
 
-            val profileName = PluginSiteBrowserPolicy.profileName(pluginId)
+            return create(
+                context,
+                PluginSiteBrowserPolicy.profileName(pluginId),
+                url,
+                Mode.PLUGIN,
+                null,
+                listener,
+            )
+        }
+
+        fun openCore(
+            context: Context,
+            rawUrl: String,
+            listener: Listener,
+        ): PluginSiteBrowser {
+            check(Looper.myLooper() == Looper.getMainLooper()) { "站内浏览器只能在主线程打开" }
+            val url = PluginSiteBrowserPolicy.coreUrl(rawUrl)
+            check(isSupported()) { "当前 WebView 不支持 Core 独立浏览器 profile" }
+            return create(
+                context,
+                PluginSiteBrowserPolicy.CORE_PROFILE_NAME,
+                url,
+                Mode.CORE,
+                null,
+                listener,
+            )
+        }
+
+        fun openDocument(
+            context: Context,
+            rawUrl: String,
+            resource: (WebResourceRequest) -> WebResourceResponse?,
+            listener: Listener,
+        ): PluginSiteBrowser {
+            check(Looper.myLooper() == Looper.getMainLooper()) { "站内浏览器只能在主线程打开" }
+            val url = PluginSiteBrowserPolicy.documentInitialUrl(rawUrl)
+            check(isSupported()) { "当前 WebView 不支持文档独立浏览器 profile" }
+            return create(
+                context,
+                PluginSiteBrowserPolicy.DOCUMENT_PROFILE_NAME,
+                url,
+                Mode.DOCUMENT,
+                resource,
+                listener,
+            )
+        }
+
+        private fun create(
+            context: Context,
+            profileName: String,
+            url: String,
+            mode: Mode,
+            documentResource: ((WebResourceRequest) -> WebResourceResponse?)?,
+            listener: Listener,
+        ): PluginSiteBrowser {
             val profile = ProfileStore.getInstance().getOrCreateProfile(profileName)
             var webView: WebView? = null
             try {
@@ -512,6 +697,8 @@ class PluginSiteBrowser private constructor(
                         context.applicationContext,
                         webView,
                         profile,
+                        mode,
+                        documentResource,
                         listener,
                         url,
                     )
@@ -559,7 +746,7 @@ class PluginSiteBrowser private constructor(
     }
 }
 
-/** The browser is installed-page only. Preview is an explicit refusal, not a fallback mode. */
+/** The plugin browser is installed-page only. Preview refusal never falls back to a real browser. */
 enum class PluginSiteBrowserSurface {
     INSTALLED,
     PREVIEW,

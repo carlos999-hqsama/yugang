@@ -22,12 +22,13 @@ object PluginProcess {
     private const val FINALIZATION_TIMEOUT_SECONDS = 1L
     internal const val EXECUTION_TIMEOUT_SECONDS = 72L
 
-    fun run(context: Context, request: JSONObject, cancellation: PluginCancellation): JSONObject {
+    fun run(context: Context, request: JSONObject, cancellation: PluginCancellation): JSONObject = PluginInvocationBudget.run {
+        runAdmitted(context, request, cancellation)
+    }
+
+    private fun runAdmitted(context: Context, request: JSONObject, cancellation: PluginCancellation): JSONObject {
         cancellation.check()
-        val executable = JSONObject(request.toString())
-        executable.getJSONObject("bundle").remove("resources")
-        val bytes = executable.toString().toByteArray()
-        require(bytes.size <= MAX_INPUT_BYTES) { "插件输入过大" }
+        val bytes = PluginInvocationBudget.executable(request)
         val lib = context.applicationInfo.nativeLibraryDir
         val root = File(context.filesDir, "rt/rootfs")
         require(File(root, "opt/pd/plugin-runner.mjs").isFile) { "请先安装插件版宿主运行时" }
@@ -96,8 +97,11 @@ object PluginProcess {
             put("PD_HOST_RUNTIME_SOCKET", HostRuntimeControl.start(context))
         }
         val process = builder.start()
-        cancellation.onCancel { process.destroyForcibly() }
+        val finalized=java.util.concurrent.atomic.AtomicBoolean(false)
+        val detachProcess=cancellation.onCancel { if(!finalized.get())process.destroyForcibly() }
+        var detachGroup:(()->Unit)?=null
         val pool = Executors.newFixedThreadPool(IO_THREAD_COUNT)
+        val logsExceeded = java.util.concurrent.atomic.AtomicBoolean(false)
         var group = 0
         try {
             // Drain stderr with a bound; never forward plugin logs or arbitrary exception text to
@@ -109,7 +113,11 @@ object PluginProcess {
                     val k = process.errorStream.read(b)
                     if (k < 0) break
                     n += k
-                    check(n <= MAX_STDERR_BYTES) { "插件日志过多" }
+                    if (n > MAX_STDERR_BYTES) {
+                        logsExceeded.set(true)
+                        cancellation.cancel()
+                        throw IllegalStateException("插件日志过多，执行已停止")
+                    }
                 }
             }
             val reader = process.inputStream.bufferedReader()
@@ -121,7 +129,8 @@ object PluginProcess {
                 first.removePrefix("PD_PLUGIN_PID=").toIntOrNull()?.takeIf { it > 1 }
                     ?: error("插件进程未报告身份")
             val activeGroup = group
-            cancellation.onCancel { runCatching { Os.kill(-activeGroup, OsConstants.SIGKILL) } }
+            detachProcess()
+            detachGroup=cancellation.onCancel { if(!finalized.get()&&process.isAlive){runCatching { Os.kill(-activeGroup, OsConstants.SIGKILL) };process.destroyForcibly()} }
             cancellation.check()
             val writer = pool.submit { process.outputStream.use { it.write(bytes) } }
             val output =
@@ -145,11 +154,16 @@ object PluginProcess {
             val envelope = JSONObject(text)
             require(!envelope.has("error")) { envelope.optString("detail", "插件执行失败，操作结果需核对") }
             require(process.exitValue() == 0) { "插件执行失败，操作结果需核对" }
+            cancellation.check()
             return envelope.getJSONObject("value")
         } catch (_: java.util.concurrent.TimeoutException) {
-            error("插件执行超时，已停止；不会自动重试")
+            error(if(logsExceeded.get()) "插件日志过多，执行已停止" else "插件执行超时，已停止；不会自动重试")
+        } catch (e: Exception) {
+            if(logsExceeded.get())error("插件日志过多，执行已停止")
+            throw e
         } finally {
-            if (group > 1) runCatching { Os.kill(-group, OsConstants.SIGKILL) }
+            finalized.set(true);detachProcess();detachGroup?.invoke()
+            if (group > 1&&process.isAlive) runCatching { Os.kill(-group, OsConstants.SIGKILL) }
             process.destroyForcibly()
             pool.shutdownNow()
         }

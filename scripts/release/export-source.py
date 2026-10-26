@@ -101,6 +101,7 @@ TEXT_SUFFIXES = {
     ".js",
     ".css",
     ".kt",
+    ".java",
     ".kts",
     ".gradle",
     ".xml",

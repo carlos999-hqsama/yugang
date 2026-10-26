@@ -2,13 +2,23 @@ package com.personaldashboard.app
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class PluginSiteBrowserPolicyTest {
+    @Test
+    fun `reports retain CDN resources without granting external main frames local files`() {
+        assertTrue(PluginSiteBrowserPolicy.documentNetworkResource("https://cdn.example.test/chart.js", false))
+        assertFalse(PluginSiteBrowserPolicy.documentNetworkResource("https://cdn.example.test/chart.js", true))
+        assertFalse(PluginSiteBrowserPolicy.documentNetworkResource("https://dshfile.pd.local/BOT/a/chart.js", false))
+        assertFalse(PluginSiteBrowserPolicy.documentNetworkResource("file:///secret", false))
+    }
+
     @Test
     fun `http and https urls are accepted without credentials`() {
         assertEquals(
@@ -75,6 +85,119 @@ class PluginSiteBrowserPolicyTest {
         val longest = PluginSiteBrowserPolicy.profileName("a".repeat(48))
         assertTrue(longest.matches(Regex("yg[0-9]{2}[a-z0-9]+")))
         assertTrue(longest.length <= 53)
+    }
+
+    @Test
+    fun `core and document profiles are stable and cannot collide with plugin profiles`() {
+        assertEquals("ygxcorebrowser1", PluginSiteBrowserPolicy.CORE_PROFILE_NAME)
+        assertEquals("ygxdocumentbrowser1", PluginSiteBrowserPolicy.DOCUMENT_PROFILE_NAME)
+        assertNotEquals(
+            PluginSiteBrowserPolicy.CORE_PROFILE_NAME,
+            PluginSiteBrowserPolicy.DOCUMENT_PROFILE_NAME,
+        )
+
+        val pluginPattern = Regex("yg[0-9]{2}[a-z0-9]+")
+        assertFalse(PluginSiteBrowserPolicy.CORE_PROFILE_NAME.matches(pluginPattern))
+        assertFalse(PluginSiteBrowserPolicy.DOCUMENT_PROFILE_NAME.matches(pluginPattern))
+        val pluginProfiles =
+            listOf("core", "document", "demo-plugin", "a00", "a".repeat(48))
+                .map(PluginSiteBrowserPolicy::profileName)
+        pluginProfiles.forEach { assertTrue(it.matches(pluginPattern)) }
+        assertFalse(PluginSiteBrowserPolicy.CORE_PROFILE_NAME in pluginProfiles)
+        assertFalse(PluginSiteBrowserPolicy.DOCUMENT_PROFILE_NAME in pluginProfiles)
+    }
+
+    @Test
+    fun `core open accepts only url and title and reserves the document origin`() {
+        assertEquals(
+            "https://example.test/read?from=core",
+            PluginSiteBrowserPolicy.openCoreRequest(
+                JSONObject()
+                    .put("url", "https://example.test/read?from=core")
+                    .put("title", "阅读"),
+            ),
+        )
+        assertRejected {
+            PluginSiteBrowserPolicy.openCoreRequest(
+                JSONObject()
+                    .put("url", "https://example.test/")
+                    .put("userGesture", true),
+            )
+        }
+        assertRejected {
+            PluginSiteBrowserPolicy.openCoreRequest(JSONObject().put("title", "缺少地址"))
+        }
+        assertRejected {
+            PluginSiteBrowserPolicy.openCoreRequest(
+                JSONObject().put("url", "https://dshfile.pd.local/private/report.html"),
+            )
+        }
+    }
+
+    @Test
+    fun `document open and subresources require the controlled origin`() {
+        val initial = "https://dshfile.pd.local/documents/report.html"
+        assertEquals(initial, PluginSiteBrowserPolicy.documentInitialUrl(initial))
+        assertEquals(
+            "https://dshfile.pd.local/assets/report.css",
+            PluginSiteBrowserPolicy.documentResourceUrl("https://dshfile.pd.local/assets/report.css"),
+        )
+        assertEquals(
+            "https://dshfile.pd.local/media/narration.mp3",
+            PluginSiteBrowserPolicy.documentResourceUrl("https://dshfile.pd.local/media/narration.mp3"),
+        )
+
+        for (url in listOf(
+            "https://dshfile.pd.local/",
+            "http://dshfile.pd.local/documents/report.html",
+            "https://example.test/documents/report.html",
+            "https://dshfile.pd.local.example.test/documents/report.html",
+            "https://user@dshfile.pd.local/documents/report.html",
+            "https://dshfile.pd.local:444/documents/report.html",
+        )) {
+            assertRejected { PluginSiteBrowserPolicy.documentInitialUrl(url) }
+        }
+        assertRejected {
+            PluginSiteBrowserPolicy.documentResourceUrl("https://example.test/tracker.js")
+        }
+    }
+
+    @Test
+    fun `document handoff requires a real main frame GET gesture`() {
+        val external = "https://example.test/next"
+        assertEquals(
+            external,
+            PluginSiteBrowserPolicy.documentHandoffUrl(external, true, true, "GET"),
+        )
+        assertNull(
+            PluginSiteBrowserPolicy.documentHandoffUrl(
+                "https://dshfile.pd.local/documents/next.html",
+                true,
+                true,
+                "GET",
+            ),
+        )
+        assertNull(PluginSiteBrowserPolicy.documentHandoffUrl(external, true, false, "GET"))
+        assertNull(PluginSiteBrowserPolicy.documentHandoffUrl(external, false, true, "GET"))
+        assertNull(PluginSiteBrowserPolicy.documentHandoffUrl(external, true, true, "POST"))
+    }
+
+    @Test
+    fun `document handoff receipt carries an explicit Core target`() {
+        val receipt =
+            PluginSiteBrowserPolicy.documentHandoffReceipt(
+                true,
+                "https://dshfile.pd.local/documents/report.html",
+                "https://example.test/next",
+            )
+        assertEquals(true, receipt.getBoolean("opened"))
+        assertEquals(true, receipt.getBoolean("closed"))
+        assertEquals(
+            "https://dshfile.pd.local/documents/report.html",
+            receipt.getString("finalUrl"),
+        )
+        assertEquals("https://example.test/next", receipt.getString("openCoreUrl"))
+        assertEquals(4, receipt.length())
     }
 
     @Test

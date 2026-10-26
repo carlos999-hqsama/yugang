@@ -28,6 +28,12 @@ export function makeStorage(initial = {}) {
  *   globals: 注入 sandbox 的全局对象
  */
 export async function loadModule(entry, { stubs = {}, globals = {}, document } = {}) {
+  if (globals.window && typeof globals.window.addEventListener !== 'function') {
+    const lifecycle = new EventTarget();
+    globals.window.addEventListener = lifecycle.addEventListener.bind(lifecycle);
+    globals.window.removeEventListener = lifecycle.removeEventListener.bind(lifecycle);
+    globals.window.dispatchEvent = lifecycle.dispatchEvent.bind(lifecycle);
+  }
   const context = vm.createContext({ console, ...globals });
   const cache = new Map();
   const build = (file) => {

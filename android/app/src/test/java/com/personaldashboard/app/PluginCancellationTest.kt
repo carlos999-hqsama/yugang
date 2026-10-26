@@ -30,4 +30,15 @@ class PluginCancellationTest {
         try{synchronized(c){c.check();wrote=true};fail()}catch(_:IllegalStateException){}
         assertFalse(wrote);t.join()
     }
+
+    @org.junit.Test fun parentAndChildCancellationDoNotHoldCallbacksUnderMonitor() {
+        val parent=PluginCancellation();val child=PluginCancellation()
+        val parentEntered=java.util.concurrent.CountDownLatch(1);val childEntered=java.util.concurrent.CountDownLatch(1)
+        val detach=parent.onCancel { parentEntered.countDown();check(childEntered.await(2,java.util.concurrent.TimeUnit.SECONDS));child.cancel() }
+        child.onCancel { childEntered.countDown();check(parentEntered.await(2,java.util.concurrent.TimeUnit.SECONDS));detach() }
+        val a=Thread{parent.cancel()}.apply{isDaemon=true};val b=Thread{child.cancel()}.apply{isDaemon=true}
+        a.start();b.start();a.join(3000);b.join(3000)
+        org.junit.Assert.assertFalse("parent cancellation hung",a.isAlive)
+        org.junit.Assert.assertFalse("child cancellation hung",b.isAlive)
+    }
 }

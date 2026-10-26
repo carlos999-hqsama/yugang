@@ -118,3 +118,30 @@ PluginApiSessions 为当前插件的普通/流式 fetch 提供显式 opt-in Cook
 通知 request 由 Bridge 异步接管，MainActivity 转发真实系统结果；不在生命周期锁内等待 UI。后台只记录动作显式 result 的有界脱敏快照和错误说明，generation 保持并发与清理边界。
 
 2026-10-25 浏览器原生内容页：挂载在左侧菜单以下的右侧内容 surface，菜单布局/样式/点击保持不变；原生返回、更多、关闭与进度不修改外站。预览上下文由 native.isPreview 提供；预期权限/策略拒绝按调用回执，不记为页面故障，也不关闭其他流。
+
+## 对话多媒体与浏览器统一（2026-10-26）
+
+对话附件入口为“图片”和“文件”。图片沿用上游图像规范化及会话附件 API；发送回显用同一 rpcId 交接原缩略图，读取持久化图片期间保留缩略图，失败可重试。草稿最多 6 项，自适应换行，预览与移除独立。
+
+文件和视频由系统选择器交给 BotAttachmentTransfer，在原生私有缓存暂存，JS 只持有不透明 handle、名称、类型和大小。每条消息最多 6 项，跨草稿活动暂存最多 64 文件及 256 MiB，失败记录可放弃重试释放空间；上传以二进制流调用上游 uploadFileBinary，原生注入本机认证，验证 receipt 后才将 `{type:'file',receiptId}` 交给 session/prompt。取消阻止随后发消息，每次上传尝试使用独立取消编号；消息结果未知时保留消息身份及已上传凭据，明确 FILE_NOT_STAGED 才允许用户下一次重试重新上传。视频传输不等于模型已理解视频内容。
+
+历史文件通过宿主级 chat-attachments overlay 注册的 `/api/yugang/session-file` 读取，不依赖某个 Agent 首次激活。Bot 生成的工作区文件通过 `/api/yugang/workspace-file` 按 fs provider 的 resolve/contains/processPath 读取，支持最大 256 MiB 和 Range，避开上游 `/api/file` 的图像大小上限。历史附件服务先 inspect 指定会话，严格匹配已持久化 user/message 中的文件引用、名称和大小，再用官方 attachments provider 读取；支持 GET/HEAD、单段 Range、背压与中止。接口不接受文件路径，HTML/SVG 在认证 API 来源中受 CSP 限制。
+
+普通网页和本地交付文件复用 PluginSiteBrowserHost 的内容 surface、返回/关闭、下载和生命周期；Core 网页、文档、各插件登录空间分别使用独立 profile。Bot 链接、主页面实际链接、插件页面真实锚点、原生插件链接、文本预览和 DSH 备用页外链均接入该底座，Panes 仅保留认证 DSH 备用页与图片代理。原生观察到的插件链接点击通过 openUserLink 进入该插件 profile，并检查当前 revision；JS browser API 仍保留原 capability/手势契约。
+
+ChatContent 对本地文件授予当前 Bot 工作区或精确会话附件来源，不向网页提供宿主桥或认证 Cookie；普通 CDN 子资源按独立文档 profile 请求，受控文件地址始终经原生 provider。网页链接真实点击后关闭文档并交接普通浏览器。文本按 2 MiB UTF-8 上限显示，音视频提供原生 WebView 控件和保存入口；PDF/Office 等保存至 Download/鱼缸后交给系统查看器，下载不完整会清除半成品。系统不支持 MULTI_PROFILE 时明确提示更新 WebView。
+
+本次复查同时修复普通 fetch 的取消先于登记竞态（有界、限时取消标记；只取消精确请求）及旧页面 apiSession 操作与更新的竞态（与更新/卸载共用生命周期锁并重新检查 revision 和取消）。两项均保留原有合成竞态复现为回归，避免旧页面清除新版登录会话。
+
+
+## 2026-10-26 通用系统底座扩展
+
+页面和原生动作共用 PluginHostServices；声明与操作目录由 PluginCapabilities 同时用于发现和准入，避免文档有能力而执行端没有实现。需要 Android 界面的操作仅允许已安装的可见前台插件，由 ActivityResult 接收并核对原 revision。网站无原生桥，浏览器正文提取只读取请求插件的当前页面。
+
+桥使用进程共享、有界的 IO 队列与按页面的调用额度；退出只释放该页面排队工作。调用输入、执行信封、脚本进程并发和日志均有实质限制；取消回调在锁外执行，退出会拆除进程取消钩子，避免父子取消互锁和复用进程组的误杀。
+
+安装态索引、不可变插件包、独立 state 分开保存。索引引用的长度和摘要在执行读取时校验；更新复用上一版本引用。旧注册表迁移前保留原始私有副本，逐插件隔离损坏；主文件不可用时读取已校验备份，均不可用时只读停写并在管理页/能力发现报告恢复状态。后台计划同样原子保存并可恢复备份，开机和更新仅恢复系统计划，不自行拉起会话或界面。
+
+文件使用系统选择器和按插件隔离的不透明句柄，FileProvider仅暴露宿主专用导出缓存。传输独立于页面调用，以加密任务记录、真实流和 JobScheduler 跟踪状态；普通上传未知结果不自动重放，下载断点需强ETag/Range校验。系统分享通过宿主选目标，Bot只收草稿。通知监听必须由用户开启系统权限，插件再明确选择来源App，只保存短期内存事件。API连接由Keystore加密保存，宿主代加凭据，OAuth PKCE只接受当前版本的一次性流程，凭据请求不跟随重定向。
+
+拍照、联系人单选、日程编辑、前台粗略定位通过系统交互；伴侣设备关联按插件归属，BLE会话在页面隐藏或版本失效时释放。系统/硬件支持和远端成功仍需读取真实结果，能力发现的available不代替授权和可用性检查。开发者参数见 APK 内 plugin-developer/system-api.md。

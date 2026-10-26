@@ -13,6 +13,7 @@ import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import org.json.JSONObject
+import okio.buffer
 
 /**
  * 所有内置 dsh 请求都在原生侧完成：补登录 Cookie，不带 Origin，Host 只能是回环地址。
@@ -126,12 +127,26 @@ class Net(
     }
 
     /** dsh 原始请求（文件代理用），返回 Response，调用方负责关闭 */
-    fun dshRaw(pathAndQuery: String): Response =
-        client
-            .newCall(
-                auth("dsh", Request.Builder().url(base("dsh") + checkPath(pathAndQuery))).build(),
-            )
-            .execute()
+    fun dshRaw(pathAndQuery: String, headers: Map<String, String> = emptyMap(), cancellation: PluginCancellation? = null): Response {
+        val request = auth("dsh", Request.Builder().url(base("dsh") + checkPath(pathAndQuery)))
+        headers.filterKeys { it.equals("Range", true) || it.equals("If-Range", true) }.forEach { (name, value) -> request.header(name, value) }
+        val call = client.newBuilder().callTimeout(120, TimeUnit.SECONDS).retryOnConnectionFailure(false).build().newCall(request.build())
+        val detach = cancellation?.onCancel { call.cancel() } ?: {}
+        try {
+            cancellation?.check()
+            val response = call.execute()
+            val body = response.body
+            if (body == null) { detach();return response }
+            val source = object : okio.ForwardingSource(body.source()) {
+                override fun close() { try { super.close() } finally { detach() } }
+            }.buffer()
+            return response.newBuilder().body(object : okhttp3.ResponseBody() {
+                override fun contentType() = body.contentType()
+                override fun contentLength() = body.contentLength()
+                override fun source() = source
+            }).build()
+        } catch (error: Exception) { detach();throw error }
+    }
 
     /** 配对：用 DSHBox 启动链接里的一次性 token 换 dsh 的 30 天登录 Cookie */
     fun pair(input: String) {

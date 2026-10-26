@@ -10,3 +10,7 @@
 - insert:
     - id: bot-archives
       name: file:///opt/pd/bot-archives.mjs
+
+- insert:
+    - id: chat-attachments
+      name: file:///opt/pd/chat-attachments.mjs

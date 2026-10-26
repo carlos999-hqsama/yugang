@@ -478,7 +478,7 @@ class PluginShell(
         renderer =
             NativePluginRenderer(
                 activity,
-                { activity.openExternal(it) },
+                { url -> if (generationAtRender == generation) PluginSiteBrowserHost.openUserLink(activity, "native-plugin:$current", current, currentRevision, url) },
                 { action, inputs, button ->
                     if (generationAtRender == generation) perform(action, inputs, button)
                 },
@@ -690,6 +690,7 @@ class PluginShell(
             pluginManagerView(
                 activity,
                 store.list().getJSONArray("plugins"),
+                recovery = store.recoveryStatus(fullCheck=false),
                 onBack = { open("settings") },
                 onAdd = { activity.choosePluginPackage() },
                 onEnable = { id, enabled ->
