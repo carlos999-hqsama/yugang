@@ -118,3 +118,8 @@ PD_DSH_VENDOR_ROOT="$(pwd)/.rtbuild/dl/dsh" node --test scripts/workspace-tests/
 设备仍须实测系统选择器（含云文件）、大视频上传取消/重试、后台切换、真实 WebView MULTI_PROFILE、视频编码/拖动播放、PDF/Office 系统查看器、Download/鱼缸保存与打开。浏览器合成数据截图和 JVM/Node 检查不替代这些设备业务验收。
 
 Core6 补充验证：`node --test scripts/page-framework-tests/core-bridge.test.mjs` 覆盖真实宿主桥的交互期限、上传取消和迟到回执。`ChatContentPolicyTest` 覆盖 HTML/SVG 隔离、上游 CSP 保留及媒体 Range。浏览器夹具验证交互脚本/CDN 可运行且同源文件读取与存储被阻止；此结果不代替 Android WebView 真机验收。资源紧张时构建使用 `--max-workers=1`，避免与其他重构建并行。
+
+
+模型日预算回归包括 `PluginModelBudgetTest` 的有效上限、降低/恢复、并发预留、供应商拒绝和其他插件隔离。设置页运行 `node --test scripts/interaction-tests/plugin-model-daily-limit-settings.test.mjs`。这些合成测试不代替真实设备上 status、插件设置 200000 及一笔真实供应商 usage 的验收。回退安装需同签名保留数据；预算账本保留，不能靠删除账本恢复额度，低版本不认识高预算时先在当前版本显式设置兼容值。
+
+日切和用量回归另含 PluginModelDayRolloverTest、PluginModelUsageContractTest。预算 history 不自动删除；旧二进制虽能读取当前 records 行，却不能维护修复后的跨日语义。Android 非调试发布包回退通常需要同签名且递增 versionCode 的旧源码恢复包，不能依赖直接安装低版本。

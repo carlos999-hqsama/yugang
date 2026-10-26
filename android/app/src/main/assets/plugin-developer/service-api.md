@@ -16,8 +16,10 @@ if (!answer.ok) showError(answer.error.message);
 只使用宿主已有 DeepSeek 配置，固定官方接口与受支持模型，不接受自带 endpoint/provider。用量与账户实际账单分开：宿主只根据供应商响应记入真实 token，用量未知的请求明确显示未确认预算，不声称没有消耗。完整限额和日预算以 status 返回为准。调整预算的界面放插件自己的设置中，不能替用户静默加额度。
 
 ```js
-await native.model({op:'budget',dailyTokenLimit:4000});
+await native.model({op:'budget',dailyTokenLimit:200000});
 ```
+
+宿主日上限默认 200,000，可配置；插件先读 `status.limits.dailyHardLimitTokens`，再由用户明确设置自己的日预算。提高宿主上限不改其他插件预算，不清 used/reserved。跨日迟到用量归原日期，不能倒写日期或清掉次日预留；用量字段须为供应商整数，异常保留未知预留。80% 提示注明真实用量或含预留的口径；真实用尽返回 quota，供应商余额限制返回 provider_limit，频率或并发限制返回 rate_limit；不循环重试、不静默提高预算。上游余额与宿主日预算分开显示，不能据余额臆造每日 token 配额。
 
 ## 后台调度：plugin.background
 

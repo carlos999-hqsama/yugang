@@ -28,6 +28,7 @@ let cfgLoaded = false, cfgLoading = false, loadSeq = 0, loadInFlight = null;
 let modelTest = null;
 let modelSettings = null, modelSettingsError = '', modelSettingsLoading = null, modelSettingsSaving = false;
 let verifiedModels = [], keyTesting = false, keyValidationEpoch = 0;
+let pluginModelDailyLimitFeedback = null;
 let activeTab = 'general';
 const folds = new Map();
 const drafts = new Map();
@@ -134,6 +135,32 @@ function isHttpUrl(value) {
   } catch (_) {
     return false;
   }
+}
+
+function parsePluginModelDailyLimit(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^[1-9]\d*$/.test(raw)) throw Error('插件模型每日预算上限必须是大于 0 的整数。');
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed)) throw Error('插件模型每日预算上限超出可精确保存的正整数范围。');
+  return parsed;
+}
+
+function pluginModelDailyLimitCard() {
+  const id = 'pluginModelDailyHardLimitTokens';
+  const value = fieldValue(id, cfg[id] ?? 200000);
+  return `<article class="st-card">
+    <div class="st-card-head"><span class="st-card-icon">${S.box}</span><div class="st-card-title"><h2>插件</h2><p>添加、移除和启停插件</p></div></div>
+    <div class="st-field">
+      <div class="st-field-head"><label for="${id}">插件模型每日 token 上限</label><span>正整数</span></div>
+      <input id="${id}" type="number" inputmode="numeric" min="1" step="1" value="${esc(value)}" autocomplete="off" aria-describedby="pluginModelDailyLimitHelp">
+      <p class="st-help" id="pluginModelDailyLimitHelp">宿主本地预算上限，不代表账号额度。调低不会删除插件原始预算，恢复上限后可继续使用。</p>
+    </div>
+    ${feedbackNote(pluginModelDailyLimitFeedback)}
+    <div class="st-actions">
+      <button type="button" class="st-btn primary" data-act="savePluginModelDailyLimit">${S.check}保存上限</button>
+      <button type="button" class="st-btn" data-act="pluginManager">管理插件</button>
+    </div>
+  </article>`;
 }
 
 function backgroundCard() {
@@ -278,7 +305,7 @@ function generalPanel() {
     ${modelCard()}
     ${backgroundCard()}
     ${notificationCard()}
-    <article class="st-card"><div class="st-card-head"><span class="st-card-icon">${S.box}</span><div class="st-card-title"><h2>插件</h2><p>添加、移除和启停插件</p></div></div><div class="st-actions"><button type="button" class="st-btn" data-act="pluginManager">管理插件</button></div></article>
+    ${pluginModelDailyLimitCard()}
     ${generalAdvanced()}
   </section>`;
 }
@@ -631,6 +658,19 @@ async function act(a) {
       await native.setConfig({ keepAwakeWhileRunning: !cfg.keepAwakeWhileRunning });
       cfg = await native.getConfig(); render();
       toast(cfg.keepAwakeWhileRunning ? '已开启任务期间保活' : '已关闭任务期间保活');
+    } else if (a === 'savePluginModelDailyLimit') {
+      let limit;
+      try {
+        limit = parsePluginModelDailyLimit(val('pluginModelDailyHardLimitTokens'));
+      } catch (e) {
+        pluginModelDailyLimitFeedback = { text: errorText(e), tone: 'bad' };
+        render(); toast(pluginModelDailyLimitFeedback.text); return;
+      }
+      await native.setConfig({ pluginModelDailyHardLimitTokens: limit });
+      clearDraft(['pluginModelDailyHardLimitTokens']);
+      cfg = await native.getConfig();
+      pluginModelDailyLimitFeedback = { text: '插件模型每日预算上限已保存。', tone: 'good' };
+      render(); toast('插件模型每日预算上限已保存');
     } else if (a === 'licenses') {
       await native.call('licenses');
     } else if (a === 'pluginManager') {
@@ -655,6 +695,7 @@ async function act(a) {
     const text = errorText(e);
     if (['saveModelKey', 'clearModelKey', 'clearModelKeyConfirmed', 'saveDefaultModel'].includes(a)) { modelTest = { text, tone: 'bad' }; render(); }
     else if (a === 'saveDsh' || a === 'unpair') { dshTest = { text, tone: 'bad' }; folds.set('dsh-advanced', true); render(); }
+    else if (a === 'savePluginModelDailyLimit') { pluginModelDailyLimitFeedback = { text, tone: 'bad' }; render(); }
     toast(text);
   } finally {
     busyActions.delete(a);

@@ -25,6 +25,7 @@ private constructor(
     private val modelStore: PluginModelStore,
     private val pluginStore: PluginStore?,
     private val keyProvider: () -> String,
+    private val dailyHardLimitTokens: () -> Long,
     private val endpoint: HttpUrl,
     private val today: () -> String,
 ) {
@@ -35,6 +36,7 @@ private constructor(
         PluginModelStore(context),
         PluginPlatform.store(context),
         { cfg.deepseekKey },
+        { cfg.pluginModelDailyHardLimitTokens },
         OFFICIAL_ENDPOINT.toHttpUrl(),
         { LocalDate.now().toString() },
     )
@@ -58,13 +60,14 @@ private constructor(
         requireAccess(pluginId)
         val op = request.optString("op", "chat")
         PluginModelPolicy.validateRequest(op, request)
+        val dailyHardLimit = PluginModelPolicy.validateDailyHardLimit(dailyHardLimitTokens())
         val day = today()
         return when (op) {
-            "status" -> status(pluginId, keyProvider().isNotEmpty(), day)
+            "status" -> status(pluginId, keyProvider().isNotEmpty(), day, dailyHardLimit)
             "budget" -> {
                 val limit = request.getLong("dailyTokenLimit")
-                PluginModelPolicy.validateBudget(limit)
-                budgetJson(day, modelStore.setBudget(pluginId, limit, day))
+                PluginModelPolicy.validateBudget(limit, dailyHardLimit)
+                budgetJson(day, modelStore.setBudget(pluginId, limit, day), dailyHardLimit)
             }
             "chat" ->
                 complete(
@@ -73,6 +76,7 @@ private constructor(
                     request,
                     cancellation,
                     day,
+                    dailyHardLimit,
                 )
             "translate" ->
                 complete(
@@ -87,6 +91,7 @@ private constructor(
                     request,
                     cancellation,
                     day,
+                    dailyHardLimit,
                 )
             else -> throw IllegalArgumentException("不支持的模型操作")
         }
@@ -98,6 +103,7 @@ private constructor(
         request: JSONObject,
         cancellation: PluginCancellation,
         day: String,
+        dailyHardLimit: Long,
     ): JSONObject {
         val key = keyProvider()
         require(key.isNotEmpty()) { "宿主尚未配置 DeepSeek Key" }
@@ -120,14 +126,11 @@ private constructor(
 
             val estimatedInput = PluginModelPolicy.estimateTokens(messages)
             val reservation = estimatedInput.toLong() + outputTokens
-            val before = modelStore.record(pluginId, day)
-            PluginModelPolicy.preflight(
-                before.usedTokens + before.reservedTokens,
-                before.budgetTokens,
-                estimatedInput,
-                outputTokens,
-            )
-            modelStore.reserve(pluginId, reservation, day)
+            try {
+                modelStore.reserve(pluginId, reservation, day, dailyHardLimit)
+            } catch (e: PluginModelStore.BudgetReservationRejected) {
+                return quotaResult(day, e)
+            }
             reservedTokens = reservation
 
             val body =
@@ -169,12 +172,20 @@ private constructor(
             cancellation.check()
 
             call.execute().use { response ->
+                if (response.code == 402 || response.code == 429) {
+                    val rejected =
+                        providerRejected(pluginId, day, reservedTokens, response.code, dailyHardLimit)
+
+                    reservedTokens = 0
+                    return rejected
+                }
                 if (!response.isSuccessful) {
                     return unknownResult(
                         pluginId,
                         if (response.isRedirect) "model_cross_origin_redirect"
                         else "model_http_error",
                         "模型服务返回 HTTP ${response.code}，结果未知；保守预留保留到日切",
+                        dailyHardLimit,
                     )
                 }
                 val payloadText = readBounded(pluginId, response.body?.byteStream())
@@ -186,6 +197,7 @@ private constructor(
                             pluginId,
                             "model_response_invalid",
                             "模型响应不是有效 JSON，结果未知；保守预留保留到日切",
+                            dailyHardLimit,
                         )
                     }
                 val usage =
@@ -196,6 +208,7 @@ private constructor(
                             pluginId,
                             "model_usage_missing",
                             "模型响应缺少有效 usage，结果未知；保守预留保留到日切",
+                            dailyHardLimit,
                         )
                     }
                 val settled = modelStore.settleUsage(pluginId, usage, reservedTokens, day)
@@ -214,7 +227,7 @@ private constructor(
                                     .put("message", "模型输出无效；provider 真实用量已记账"),
                             )
                             .put("usage", JSONObject().put("totalTokens", usage))
-                            .put("budget", budgetJson(day, settled))
+                            .withSettledBudget(day, settled, dailyHardLimit)
                     }
                 val result =
                     JSONObject()
@@ -224,15 +237,7 @@ private constructor(
                         .put("text", output.first)
                         .put("finishReason", output.second)
                         .put("usage", JSONObject().put("totalTokens", usage))
-                        .put("budget", budgetJson(day, settled))
-                if (settled.overBudget) {
-                    result
-                        .put("overBudget", true)
-                        .put(
-                            "warning",
-                            "provider 真实用量 ${settled.usedTokens}/${settled.budgetTokens} tokens，已超过插件预算",
-                        )
-                }
+                        .withSettledBudget(day, settled, dailyHardLimit)
                 if (cancellation.cancelled) {
                     result.put("cancelled", true).put("warning", "响应已在取消后返回；真实用量已记账")
                 }
@@ -240,7 +245,12 @@ private constructor(
             }
         } catch (e: Exception) {
             return if (networkStarted.get()) {
-                unknownResult(pluginId, "model_network_unknown", "模型网络结果未知；保守预留保留到日切")
+                unknownResult(
+                    pluginId,
+                    "model_network_unknown",
+                    "模型网络结果未知；保守预留保留到日切",
+                    dailyHardLimit,
+                )
             } else if (
                 reservedTokens > 0 &&
                     e is IllegalStateException &&
@@ -249,12 +259,20 @@ private constructor(
                 val settled = modelStore.releaseReservation(pluginId, reservedTokens, day)
                 reservedTokens = 0
                 structuredError("model_cancelled_before_request", "插件请求在网络发出前取消，未消耗远端额度")
-                    .put("budget", budgetJson(day, settled))
+                    .withBudget(day, settled, dailyHardLimit)
+            } else if (reservedTokens > 0 && e is IOException) {
+                val settled = modelStore.releaseReservation(pluginId, reservedTokens, day)
+                reservedTokens = 0
+                structuredError(
+                        "model_connection_failed_before_request",
+                        "模型连接在请求头发出前失败；本次预留已释放，未消耗远端额度",
+                    )
+                    .withBudget(day, settled, dailyHardLimit)
             } else if (reservedTokens > 0) {
                 val settled = modelStore.releaseReservation(pluginId, reservedTokens, day)
                 reservedTokens = 0
                 structuredError("model_request_construction_failed", "模型请求未能发出；本次预留已释放")
-                    .put("budget", budgetJson(day, settled))
+                    .withBudget(day, settled, dailyHardLimit)
             } else {
                 throw e
             }
@@ -284,7 +302,69 @@ private constructor(
         return output.toString("UTF-8")
     }
 
-    private fun unknownResult(pluginId: String, code: String, message: String): JSONObject {
+    private fun quotaResult(
+        day: String,
+        rejected: PluginModelStore.BudgetReservationRejected,
+    ): JSONObject =
+        JSONObject()
+            .put("ok", false)
+            .put("outcome", "known_not_sent")
+            .put("reason", rejected.reason)
+            .put(
+                "error",
+                JSONObject()
+                    .put("code", "quota")
+                    .put("reason", rejected.reason)
+                    .put("message", rejected.message.orEmpty())
+                    .put("requestedTokens", rejected.requestedTokens),
+            )
+            .withBudget(day, rejected.record, rejected.dailyHardLimitTokens)
+
+    private fun providerRejected(
+        pluginId: String,
+        day: String,
+        reservedTokens: Long,
+        httpStatus: Int,
+        dailyHardLimit: Long,
+    ): JSONObject {
+        val settled = modelStore.releaseReservation(pluginId, reservedTokens, day)
+        val (code, reason, message) =
+            when (httpStatus) {
+                402 ->
+                    Triple(
+                        "provider_limit",
+                        "provider_insufficient_balance",
+                        "DeepSeek 返回 HTTP 402：账户余额不足；未自动重试或增加插件预算",
+                    )
+                429 ->
+                    Triple(
+                        "rate_limit",
+                        "provider_rate_limited",
+                        "DeepSeek 返回 HTTP 429：请求被限流；未自动重试或增加插件预算",
+                    )
+                else -> error("仅明确分类 provider 402/429")
+            }
+        return JSONObject()
+            .put("ok", false)
+            .put("outcome", "provider_rejected")
+            .put("reason", reason)
+            .put(
+                "error",
+                JSONObject()
+                    .put("code", code)
+                    .put("reason", reason)
+                    .put("httpStatus", httpStatus)
+                    .put("message", message),
+            )
+            .withBudget(day, settled, dailyHardLimit)
+    }
+
+    private fun unknownResult(
+        pluginId: String,
+        code: String,
+        message: String,
+        dailyHardLimit: Long,
+    ): JSONObject {
         // The call is already reserved. Read without mutation so concurrent plugin calls still
         // see the same reservation and cannot spend it twice.
         val day = today()
@@ -293,7 +373,7 @@ private constructor(
             .put("ok", false)
             .put("outcome", "unknown")
             .put("error", JSONObject().put("code", code).put("message", message))
-            .put("budget", budgetJson(day, record))
+            .withBudget(day, record, dailyHardLimit)
     }
 
     private fun structuredError(code: String, message: String): JSONObject =
@@ -310,7 +390,12 @@ private constructor(
         }
     }
 
-    private fun status(pluginId: String, configured: Boolean, day: String): JSONObject {
+    private fun status(
+        pluginId: String,
+        configured: Boolean,
+        day: String,
+        dailyHardLimit: Long,
+    ): JSONObject {
         val budget = modelStore.record(pluginId, day)
         return JSONObject()
             .put("configured", configured)
@@ -318,20 +403,90 @@ private constructor(
             .put("defaultModel", PluginModelPolicy.DEFAULT_MODEL)
             .put("allowedModels", JSONArray(PluginModelPolicy.ALLOWED_MODELS))
             .put("thinking", "disabled")
-            .put("limits", limits())
-            .put("budget", budgetJson(day, budget))
+            .put("limits", limits(dailyHardLimit))
+            .withBudget(day, budget, dailyHardLimit)
     }
 
-    private fun budgetJson(day: String, budget: PluginModelStore.BudgetRecord): JSONObject =
-        JSONObject()
-            .put("date", day)
-            .put("limitTokens", budget.budgetTokens)
+    private fun JSONObject.withBudget(
+        day: String,
+        budget: PluginModelStore.BudgetRecord,
+        dailyHardLimit: Long,
+    ): JSONObject {
+        val value = budgetJson(day, budget, dailyHardLimit)
+        put("budget", value)
+        value.optJSONObject("warning")?.let { put("budgetWarning", it) }
+        return this
+    }
+
+    private fun JSONObject.withSettledBudget(
+        day: String,
+        settled: PluginModelStore.BudgetRecord,
+        dailyHardLimit: Long,
+    ): JSONObject {
+        withBudget(day, settled, dailyHardLimit)
+        val effectiveBudget = settled.effectiveBudgetTokens(dailyHardLimit)
+        if (settled.overBudgetAt(effectiveBudget)) {
+            put("overBudget", true)
+            put(
+                "warning",
+                "provider 真实用量 ${settled.usedTokens}/$effectiveBudget tokens，已达到或超过当前有效每日预算",
+            )
+        }
+        return this
+    }
+
+    private fun budgetJson(
+        day: String,
+        budget: PluginModelStore.BudgetRecord,
+        dailyHardLimit: Long,
+    ): JSONObject {
+        PluginModelPolicy.validateDailyHardLimit(dailyHardLimit)
+        val effectiveBudget = budget.effectiveBudgetTokens(dailyHardLimit)
+        val result =
+            JSONObject()
+                .put("date", day)
+                .put("limitTokens", effectiveBudget)
+                .put("configuredLimitTokens", budget.budgetTokens)
+                .put("usedTokens", budget.usedTokens)
+                .put("reservedTokens", budget.reservedTokens)
+                .put("remainingTokens", budget.availableAt(effectiveBudget))
+                .put("overBudget", budget.overBudgetAt(effectiveBudget))
+                .put("budgetExhausted", budget.exhaustedAt(effectiveBudget))
+        budgetWarning(budget, effectiveBudget)?.let { result.put("warning", it) }
+        return result
+    }
+
+    private fun budgetWarning(
+        budget: PluginModelStore.BudgetRecord,
+        effectiveBudget: Long,
+    ): JSONObject? {
+        val basis =
+            PluginModelPolicy.budgetWarningBasis(
+                budget.usedTokens,
+                budget.reservedTokens,
+                effectiveBudget,
+            )
+                ?: return null
+        val realUsage = basis == "used"
+        return JSONObject()
+            .put("code", "quota")
+            .put("reason", "daily_budget_80_percent")
+            .put("thresholdPercent", PluginModelPolicy.BUDGET_WARNING_THRESHOLD_PERCENT)
+            .put("basis", basis)
             .put("usedTokens", budget.usedTokens)
             .put("reservedTokens", budget.reservedTokens)
-            .put("remainingTokens", budget.availableTokens)
-            .put("overBudget", budget.overBudget)
+            .put("limitTokens", effectiveBudget)
+            .put("remainingTokens", budget.availableAt(effectiveBudget))
+            .put(
+                "message",
+                if (realUsage)
+                    "插件本地当前有效每日预算真实用量已达到 80%（${budget.usedTokens}/$effectiveBudget tokens）"
+                else
+                    "真实用量与未知结果预留合计已达到当前有效每日预算的 80%；预留不计作真实用尽",
+            )
+    }
 
-    private fun limits(): JSONObject =
+    private fun limits(dailyHardLimit: Long): JSONObject =
         JSONObject()
             .put("maxMessages", PluginModelPolicy.MAX_MESSAGES)
             .put("maxMessageChars", PluginModelPolicy.MAX_MESSAGE_CHARS)
@@ -346,7 +501,7 @@ private constructor(
             .put("minTimeoutMs", PluginModelPolicy.MIN_TIMEOUT_MS)
             .put("maxTimeoutMs", PluginModelPolicy.MAX_TIMEOUT_MS)
             .put("maxConcurrentCalls", PluginModelPolicy.MAX_CONCURRENT_CALLS)
-            .put("dailyHardLimitTokens", PluginModelPolicy.MAX_DAILY_BUDGET_TOKENS)
+            .put("dailyHardLimitTokens", dailyHardLimit)
             .put("maxResponseBytes", PluginModelPolicy.MAX_RESPONSE_BYTES)
 
     companion object {
@@ -366,6 +521,7 @@ private constructor(
                 PluginModelStore(context),
                 null,
                 { cfg.deepseekKey },
+                { cfg.pluginModelDailyHardLimitTokens },
                 OFFICIAL_ENDPOINT.toHttpUrl(),
                 { LocalDate.now().toString() },
             )
@@ -377,12 +533,15 @@ private constructor(
             key: String,
             endpoint: String,
             today: String = "2026-10-23",
+            dailyHardLimitTokens: Long = Config.DEFAULT_PLUGIN_MODEL_DAILY_HARD_LIMIT_TOKENS,
         ): PluginModel {
             val url = endpoint.toHttpUrl()
             require(url.scheme == "http" && url.host in setOf("127.0.0.1", "localhost")) {
                 "测试注入只允许本机 MockWebServer"
             }
-            return PluginModel(modelStore, pluginStore, { key }, url) { today }
+            return PluginModel(modelStore, pluginStore, { key }, { dailyHardLimitTokens }, url) {
+                today
+            }
         }
     }
 }

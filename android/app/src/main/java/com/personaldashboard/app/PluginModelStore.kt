@@ -25,7 +25,7 @@ class PluginModelStore(directory: File) {
         }
 
     fun setBudget(pluginId: String, budgetTokens: Long, today: String): BudgetRecord {
-        PluginModelPolicy.validateBudget(budgetTokens)
+        PluginModelPolicy.validateStoredBudget(budgetTokens)
         return transaction(pluginId, today) { row ->
             val current = row ?: BudgetRecord(budgetTokens, 0, 0)
             current.copy(budgetTokens = budgetTokens)
@@ -36,14 +36,34 @@ class PluginModelStore(directory: File) {
      * Atomically reserve a conservative call allowance. Unknown outcomes keep the reservation until
      * the local day rolls over; they are never reported as used.
      */
-    fun reserve(pluginId: String, tokens: Long, today: String): BudgetRecord {
+    fun reserve(
+        pluginId: String,
+        tokens: Long,
+        today: String,
+        dailyHardLimitTokens: Long,
+    ): BudgetRecord {
         require(tokens > 0) { "模型预留用量必须大于零" }
+        PluginModelPolicy.validateDailyHardLimit(dailyHardLimitTokens)
         return transaction(pluginId, today) { row ->
             val current = row ?: BudgetRecord(PluginModelPolicy.DEFAULT_DAILY_BUDGET_TOKENS, 0, 0)
-            check(current.availableTokens >= tokens) {
-                "剩余模型预算不足（真实已用 ${current.usedTokens}，结果未知预留 ${current.reservedTokens}）"
+            val effectiveBudget = current.effectiveBudgetTokens(dailyHardLimitTokens)
+            val refusal =
+                PluginModelPolicy.reservationRefusal(
+                    current.usedTokens,
+                    current.reservedTokens,
+                    effectiveBudget,
+                    tokens,
+                )
+            if (refusal != null) {
+                throw BudgetReservationRejected(
+                    refusal.reason,
+                    current,
+                    tokens,
+                    dailyHardLimitTokens,
+                    refusal.message,
+                )
             }
-            current.copy(reservedTokens = current.reservedTokens + tokens)
+            current.copy(reservedTokens = Math.addExact(current.reservedTokens, tokens))
         }
     }
 
@@ -60,7 +80,7 @@ class PluginModelStore(directory: File) {
             val current = row ?: error("模型预留记录不存在，不能结算未知状态")
             val released = reservedTokens.coerceAtMost(current.reservedTokens)
             current.copy(
-                usedTokens = current.usedTokens + actualTokens,
+                usedTokens = Math.addExact(current.usedTokens, actualTokens),
                 reservedTokens = current.reservedTokens - released,
             )
         }
@@ -83,24 +103,55 @@ class PluginModelStore(directory: File) {
         change: (BudgetRecord?) -> BudgetRecord,
     ): BudgetRecord {
         val id = PluginContract.id(pluginId)
-        require(Regex("\\d{4}-\\d{2}-\\d{2}").matches(today)) { "模型预算日期无效" }
+        validateDay(today)
         synchronized(lock) {
             val root = loadRequired()
             val records = root.getJSONObject("records")
             val old = records.optJSONObject(id)
             val previous = old?.let(::rowToRecord)
-            val effectivePrevious =
-                if (old?.optString("day") == today) previous
-                else {
-                    // Carry the user's configured limit; a new day releases old reservations.
-                    previous?.copy(usedTokens = 0, reservedTokens = 0)
+            if (previous != null) {
+                val currentDay = old?.optString("day") ?: error("模型预算日期无效")
+                if (currentDay != today) {
+                    val history = historyForPlugin(root, id)
+                    if (today < currentDay) {
+                        // A late response belongs to its original day. Never backdate or reset the
+                        // current row; legacy files without history still retain known usage.
+                        val historical =
+                            history.optJSONObject(today)?.let(::rowToRecord)
+                                ?: BudgetRecord(previous.budgetTokens, 0, 0)
+                        val result = change(historical)
+                        validate(result)
+                        history.put(today, recordToRow(result, today))
+                        save(root)
+                        return result
+                    }
+
+                    // Forward rollover archives only this plugin's immediately previous day. The
+                    // old reservation no longer consumes the new day but remains settleable.
+                    check(!history.has(currentDay)) { "模型预算历史日期冲突，已停止本次模型操作" }
+                    history.put(currentDay, recordToRow(previous, currentDay))
+                    val result = change(previous.copy(usedTokens = 0, reservedTokens = 0))
+                    validate(result)
+                    records.put(id, recordToRow(result, today))
+                    save(root)
+                    return result
                 }
-            val result = change(effectivePrevious)
+            }
+
+            val result = change(previous)
             validate(result)
             records.put(id, recordToRow(result, today))
             save(root)
             return result
         }
+    }
+
+    private fun historyForPlugin(root: JSONObject, pluginId: String): JSONObject {
+        val history =
+            if (root.has("history")) root.getJSONObject("history")
+            else JSONObject().also { root.put("history", it) }
+        if (history.has(pluginId)) return history.getJSONObject(pluginId)
+        return JSONObject().also { history.put(pluginId, it) }
     }
 
     private fun loadRequired(): JSONObject {
@@ -119,16 +170,40 @@ class PluginModelStore(directory: File) {
             PluginContract.id(key)
             rowToRecord(records.getJSONObject(key))
         }
+        validateHistory(parsed)
         return parsed
+    }
+
+    private fun validateHistory(root: JSONObject) {
+        val raw = root.opt("history") ?: return
+        if (raw !is JSONObject) error("宿主模型预算历史结构损坏，已停止本次模型操作")
+        raw.keys().asSequence().forEach { pluginId ->
+            PluginContract.id(pluginId)
+            val days = raw.getJSONObject(pluginId)
+            days.keys().asSequence().forEach { day ->
+                validateDay(day)
+                val row = days.getJSONObject(day)
+                if (row.optString("day") != day) {
+                    error("宿主模型预算历史日期损坏，已停止本次模型操作")
+                }
+                rowToRecord(row)
+            }
+        }
+    }
+
+    private fun validateDay(day: String) {
+        require(Regex("\\d{4}-\\d{2}-\\d{2}").matches(day)) { "模型预算日期无效" }
     }
 
     private fun rowToRecord(row: JSONObject): BudgetRecord {
         if (!row.has("day")) error("宿主模型预算记录损坏，已停止本次模型操作")
+        validateDay(row.optString("day"))
         return BudgetRecord(
-            budgetTokens = row.getLong("budgetTokens"),
-            usedTokens = row.getLong("usedTokens"),
-            reservedTokens = row.getLong("reservedTokens"),
-        )
+                budgetTokens = row.getLong("budgetTokens"),
+                usedTokens = row.getLong("usedTokens"),
+                reservedTokens = row.getLong("reservedTokens"),
+            )
+            .also { validate(it) }
     }
 
     private fun recordToRow(record: BudgetRecord, today: String): JSONObject =
@@ -139,7 +214,7 @@ class PluginModelStore(directory: File) {
             .put("reservedTokens", record.reservedTokens)
 
     private fun validate(record: BudgetRecord) {
-        PluginModelPolicy.validateBudget(record.budgetTokens)
+        PluginModelPolicy.validateStoredBudget(record.budgetTokens)
         require(record.usedTokens >= 0 && record.reservedTokens >= 0) { "模型预算记录无效" }
     }
 
@@ -164,12 +239,38 @@ class PluginModelStore(directory: File) {
         val usedTokens: Long,
         val reservedTokens: Long,
     ) {
-        val availableTokens: Long
-            get() = (budgetTokens - usedTokens - reservedTokens).coerceAtLeast(0)
+        fun effectiveBudgetTokens(dailyHardLimitTokens: Long): Long =
+            minOf(budgetTokens, dailyHardLimitTokens)
 
+        fun availableAt(effectiveBudgetTokens: Long): Long {
+            if (usedTokens >= effectiveBudgetTokens) return 0
+            val afterRealUsage = effectiveBudgetTokens - usedTokens
+            return if (reservedTokens >= afterRealUsage) 0 else afterRealUsage - reservedTokens
+        }
+
+        fun overBudgetAt(effectiveBudgetTokens: Long): Boolean = usedTokens >= effectiveBudgetTokens
+
+        fun exhaustedAt(effectiveBudgetTokens: Long): Boolean = usedTokens >= effectiveBudgetTokens
+
+        val availableTokens: Long
+            get() = availableAt(budgetTokens)
+
+        /** Raw-record helpers; host responses must use the current effective budget instead. */
         val overBudget: Boolean
-            get() = usedTokens + reservedTokens > budgetTokens
+            get() = overBudgetAt(budgetTokens)
+
+        val exhausted: Boolean
+            get() = exhaustedAt(budgetTokens)
     }
+
+    class BudgetReservationRejected
+        internal constructor(
+            val reason: String,
+            val record: BudgetRecord,
+            val requestedTokens: Long,
+            val dailyHardLimitTokens: Long,
+            message: String,
+        ) : IllegalStateException(message)
 
     companion object {
         private val locks = ConcurrentHashMap<String, Any>()
@@ -187,7 +288,11 @@ object PluginModelPolicy {
 
     const val DEFAULT_DAILY_BUDGET_TOKENS = 2_000L
     const val MIN_DAILY_BUDGET_TOKENS = 100L
-    const val MAX_DAILY_BUDGET_TOKENS = 20_000L
+    const val BUDGET_WARNING_THRESHOLD_PERCENT = 80
+
+    const val REASON_DAILY_BUDGET_EXHAUSTED = "daily_budget_exhausted"
+    const val REASON_DAILY_BUDGET_RESERVED = "daily_budget_reserved"
+    const val REASON_RESERVATION_EXCEEDS_REMAINING = "daily_budget_reservation_exceeds_remaining"
 
     const val MAX_MESSAGES = 16
     const val MAX_MESSAGE_CHARS = 8_000
@@ -225,9 +330,23 @@ object PluginModelPolicy {
         }
     }
 
-    fun validateBudget(value: Long) {
-        require(value in MIN_DAILY_BUDGET_TOKENS..MAX_DAILY_BUDGET_TOKENS) {
-            "每插件日预算必须在 $MIN_DAILY_BUDGET_TOKENS–$MAX_DAILY_BUDGET_TOKENS tokens 内"
+    fun validateDailyHardLimit(value: Long): Long {
+        require(value > 0) { "插件模型每日硬上限必须是正整数" }
+        return value
+    }
+
+    /** The configurable host ceiling applies to new settings, never to persisted accounting. */
+    fun validateBudget(value: Long, dailyHardLimitTokens: Long) {
+        validateDailyHardLimit(dailyHardLimitTokens)
+        validateStoredBudget(value)
+        require(value <= dailyHardLimitTokens) {
+            "每插件日预算不能超过当前宿主上限 $dailyHardLimitTokens tokens"
+        }
+    }
+
+    fun validateStoredBudget(value: Long) {
+        require(value >= MIN_DAILY_BUDGET_TOKENS) {
+            "每插件日预算不能低于 $MIN_DAILY_BUDGET_TOKENS tokens"
         }
     }
 
@@ -286,26 +405,81 @@ object PluginModelPolicy {
         return result
     }
 
-    fun preflight(
+    data class BudgetRefusal(val reason: String, val message: String)
+
+    /** Classify an atomic reservation refusal without adding counters (which could overflow). */
+    fun reservationRefusal(
         usedTokens: Long,
+        reservedTokens: Long,
         budgetTokens: Long,
-        estimatedInputTokens: Int,
-        outputTokens: Int,
-    ) {
-        require(budgetTokens in MIN_DAILY_BUDGET_TOKENS..MAX_DAILY_BUDGET_TOKENS) { "插件模型预算无效" }
-        require(usedTokens >= 0) { "插件模型用量无效" }
-        require(usedTokens + estimatedInputTokens + outputTokens <= budgetTokens) {
-            "剩余模型预算不足（真实已用 ${usedTokens}，估算输入 ${estimatedInputTokens} + 输出 $outputTokens tokens）"
+        requestedTokens: Long,
+    ): BudgetRefusal? {
+        require(budgetTokens > 0) { "插件模型有效预算无效" }
+        require(usedTokens >= 0 && reservedTokens >= 0 && requestedTokens > 0) {
+            "插件模型用量或预留无效"
         }
+        if (usedTokens >= budgetTokens) {
+            return BudgetRefusal(
+                REASON_DAILY_BUDGET_EXHAUSTED,
+                "插件本地每日预算已由真实用量耗尽（真实已用 $usedTokens/$budgetTokens tokens）",
+            )
+        }
+        val afterRealUsage = budgetTokens - usedTokens
+        val remaining =
+            if (reservedTokens >= afterRealUsage) 0 else afterRealUsage - reservedTokens
+        if (requestedTokens <= remaining) return null
+        if (reservedTokens > 0 && remaining == 0L) {
+            return BudgetRefusal(
+                REASON_DAILY_BUDGET_RESERVED,
+                "插件本地每日预算的剩余部分均被未知结果预留（真实已用 $usedTokens，预留 $reservedTokens/$budgetTokens tokens）",
+            )
+        }
+        return BudgetRefusal(
+            REASON_RESERVATION_EXCEEDS_REMAINING,
+            "本次需要预留 $requestedTokens tokens，但仅剩 $remaining（真实已用 $usedTokens，已有预留 $reservedTokens，预算 $budgetTokens）",
+        )
+    }
+
+    /** Return the accounting basis when real usage plus conservative reservations reaches 80%. */
+    fun budgetWarningBasis(usedTokens: Long, reservedTokens: Long, budgetTokens: Long): String? {
+        require(budgetTokens > 0) { "插件模型有效预算无效" }
+        require(usedTokens >= 0 && reservedTokens >= 0) { "插件模型用量无效" }
+        val threshold = budgetTokens - budgetTokens / 5
+        if (usedTokens >= threshold) return "used"
+        val untilWarning = threshold - usedTokens
+        return if (reservedTokens >= untilWarning) "used_plus_reserved" else null
     }
 
     fun parseUsage(value: JSONObject): Long {
         val usage = value.optJSONObject("usage") ?: error("MODEL_USAGE_MISSING")
-        val prompt = usage.optLong("prompt_tokens", -1)
-        val completion = usage.optLong("completion_tokens", -1)
-        val total = usage.optLong("total_tokens", -1)
-        val sum = if (prompt > 0 && completion > 0) prompt + completion else -1
-        return total.takeIf { it > 0 } ?: sum.takeIf { it > 0 } ?: error("MODEL_USAGE_MISSING")
+        if (usage.has("total_tokens")) {
+            // An explicitly supplied total is authoritative; never hide an invalid value behind
+            // fallback fields or truncate a JSON number/string into a fabricated real usage.
+            val total = strictTokenCount(usage.opt("total_tokens"))
+            if (total <= 0) error("MODEL_USAGE_MISSING")
+            return total
+        }
+        val prompt = strictTokenCount(usage.opt("prompt_tokens"))
+        val completion = strictTokenCount(usage.opt("completion_tokens"))
+        val sum =
+            try {
+                Math.addExact(prompt, completion)
+            } catch (e: ArithmeticException) {
+                throw IllegalStateException("MODEL_USAGE_MISSING", e)
+            }
+        if (sum <= 0) error("MODEL_USAGE_MISSING")
+        return sum
+    }
+
+    private fun strictTokenCount(value: Any?): Long {
+        val result =
+            when (value) {
+                is Int -> value.toLong()
+                is Long -> value
+                else -> error("MODEL_USAGE_MISSING")
+            }
+        if (result < 0) error("MODEL_USAGE_MISSING")
+        return result
     }
 
     fun parseOutput(value: JSONObject): Pair<String, String> {

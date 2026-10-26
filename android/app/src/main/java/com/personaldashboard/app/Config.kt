@@ -47,6 +47,19 @@ class Config(ctx: Context) {
         get() = sp.getBoolean("keepAwakeWhileRunning", false)
         set(v) = sp.edit().putBoolean("keepAwakeWhileRunning", v).apply()
 
+    /** Host-local finite ceiling applied to every per-plugin model admission. */
+    var pluginModelDailyHardLimitTokens: Long
+        get() =
+            sp.getLong(
+                    "pluginModelDailyHardLimitTokens",
+                    DEFAULT_PLUGIN_MODEL_DAILY_HARD_LIMIT_TOKENS,
+                )
+                .also { PluginModelPolicy.validateDailyHardLimit(it) }
+        set(v) {
+            PluginModelPolicy.validateDailyHardLimit(v)
+            sp.edit().putLong("pluginModelDailyHardLimitTokens", v).apply()
+        }
+
     var ntfyUrl: String
         get() = sp.getString("ntfyUrl", "") ?: ""
         set(v) = sp.edit().putString("ntfyUrl", v.trim()).apply()
@@ -82,6 +95,7 @@ class Config(ctx: Context) {
             .put("harnessMode", harnessMode)
             .put("ntfyUrl", ntfyUrl)
             .put("keepAwakeWhileRunning", keepAwakeWhileRunning)
+            .put("pluginModelDailyHardLimitTokens", pluginModelDailyHardLimitTokens)
             .put("appVersion", appVersion)
             .put("dshboxInstalled", dshboxInstalled)
 
@@ -128,6 +142,10 @@ class Config(ctx: Context) {
             harnessMode = if (p.optString("harnessMode") == "web") "web" else "native"
         if (p.has("keepAwakeWhileRunning"))
             keepAwakeWhileRunning = p.optBoolean("keepAwakeWhileRunning", false)
+        if (p.has("pluginModelDailyHardLimitTokens")) {
+            pluginModelDailyHardLimitTokens =
+                parsePluginModelDailyHardLimit(p.get("pluginModelDailyHardLimitTokens"))
+        }
         if (p.has("ntfyUrl")) ntfyUrl = p.optString("ntfyUrl")
     }
 
@@ -194,6 +212,14 @@ class Config(ctx: Context) {
         }
 
     companion object {
+        const val DEFAULT_PLUGIN_MODEL_DAILY_HARD_LIMIT_TOKENS = 200_000L
+
+        internal fun parsePluginModelDailyHardLimit(value: Any?): Long {
+            require(value is Int || value is Long) { "插件模型每日硬上限必须是正整数" }
+            return PluginModelPolicy.validateDailyHardLimit((value as Number).toLong())
+        }
+
+
         const val DEFAULT_DSH = "http://127.0.0.1:3080"
         const val EMBEDDED_PORT = 3090 // Public core port; the private full build retains 3088.
         const val EMBEDDED_DSH = "http://127.0.0.1:$EMBEDDED_PORT"

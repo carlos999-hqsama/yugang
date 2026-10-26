@@ -48,7 +48,10 @@ class PluginModelTest {
             .call("model-plugin",request())
         assertFalse(result.getBoolean("ok"))
         assertEquals("known_not_sent",result.getString("outcome"))
-        assertEquals(0L,budgets.record("model-plugin","2026-10-23").reservedTokens)
+        assertEquals("model_connection_failed_before_request", result.getJSONObject("error").getString("code"))
+        val record = budgets.record("model-plugin", "2026-10-23")
+        assertEquals(0L, record.reservedTokens)
+        assertEquals(0L, record.usedTokens)
     }
 
     @Test
@@ -121,10 +124,14 @@ class PluginModelTest {
             assertEquals(0L, first.getJSONObject("budget").getLong("usedTokens"))
 
             // The unknown reservation cannot be silently released and spent again.
-            try {
-                model.call("model-plugin", request(60))
-                throw AssertionError("未知结果预留后不能继续消耗当日预算")
-            } catch (_: IllegalArgumentException) {}
+            val rejected = model.call("model-plugin", request(60))
+            assertFalse(rejected.getBoolean("ok"))
+            assertEquals("quota", rejected.getJSONObject("error").getString("code"))
+            assertEquals(
+                PluginModelPolicy.REASON_RESERVATION_EXCEEDS_REMAINING,
+                rejected.getJSONObject("error").getString("reason"),
+            )
+            assertFalse(rejected.getJSONObject("budget").getBoolean("overBudget"))
             assertEquals(1, server.requestCount)
         }
     }
@@ -169,10 +176,15 @@ class PluginModelTest {
             val budgets = store(directory())
             budgets.setBudget("model-plugin", 100L, "2026-10-23")
             val model = PluginModel.forTests(budgets, null, "key", server.url("/chat/completions").toString())
-            try {
-                model.call("model-plugin", request().put("maxOutputTokens", 100))
-                throw AssertionError("预算不足时不得发出请求")
-            } catch (_: RuntimeException) { }
+            val insufficient = model.call("model-plugin", request().put("maxOutputTokens", 100))
+            assertFalse(insufficient.getBoolean("ok"))
+            assertEquals("known_not_sent", insufficient.getString("outcome"))
+            assertEquals("quota", insufficient.getJSONObject("error").getString("code"))
+            assertEquals(
+                PluginModelPolicy.REASON_RESERVATION_EXCEEDS_REMAINING,
+                insufficient.getJSONObject("error").getString("reason"),
+            )
+            assertEquals(100L, insufficient.getJSONObject("budget").getLong("limitTokens"))
             assertEquals(0, server.requestCount)
 
             budgets.setBudget("model-plugin", 200L, "2026-10-23")
@@ -181,10 +193,14 @@ class PluginModelTest {
             server.enqueue(MockResponse().setBody(noUsage.toString()))
             val unknown = model.call("model-plugin", request(100))
             assertTrue(unknown.getJSONObject("budget").getLong("reservedTokens") > 0)
-            try {
-                model.call("model-plugin", request(100))
-                throw AssertionError("未知预留不能被后续调用绕过")
-            } catch (_: RuntimeException) { }
+            val reserved = model.call("model-plugin", request(100))
+            assertFalse(reserved.getBoolean("ok"))
+            assertEquals("quota", reserved.getJSONObject("error").getString("code"))
+            assertEquals(
+                PluginModelPolicy.REASON_RESERVATION_EXCEEDS_REMAINING,
+                reserved.getJSONObject("error").getString("reason"),
+            )
+            assertFalse(reserved.getJSONObject("budget").getBoolean("overBudget"))
             assertEquals(1, server.requestCount)
         }
     }
@@ -245,6 +261,7 @@ class PluginModelTest {
             assertEquals("model_network_unknown", result.getJSONObject("error").getString("code"))
             assertTrue(result.getJSONObject("budget").getLong("reservedTokens") > 0)
             assertEquals(0L, budgets.record("model-plugin", "2026-10-23").usedTokens)
+            assertEquals(1, server.requestCount)
         }
     }
 
@@ -300,8 +317,8 @@ class PluginModelTest {
     fun `interleaved store instances keep usage for two plugins`() {
         val dir = directory()
         val a = store(dir); val b = store(dir)
-        a.reserve("plugin-a", 30L, "2026-10-23")
-        b.reserve("plugin-b", 40L, "2026-10-23")
+        a.reserve("plugin-a", 30L, "2026-10-23", 200_000L)
+        b.reserve("plugin-b", 40L, "2026-10-23", 200_000L)
         val ready = CountDownLatch(2)
         val done = CountDownLatch(2)
         val failures = AtomicInteger()
