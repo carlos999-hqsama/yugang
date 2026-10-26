@@ -4,6 +4,12 @@ import { readFileSync } from 'node:fs';
 
 const SOURCES = [['Harness', 'harness.js']];
 
+test('公共插件框架与 Bot 对话使用相同的滚动控制器', () => {
+ const host = readFileSync(new URL('../../android/app/src/main/assets/www/js/chat-scroll.js', import.meta.url),'utf8');
+ const framework = readFileSync(new URL('../../android/app/src/main/assets/plugin-framework/v1/js/chat-scroll.js', import.meta.url),'utf8');
+ assert.equal(framework,host);
+});
+
 function controllerSource(file) {
  return readFileSync(new URL('../../android/app/src/main/assets/www/js/chat-scroll.js', import.meta.url),'utf8').replace('export function','function');
 }
@@ -407,4 +413,21 @@ test('DOM 替换导致内容暂时塌缩时，钳位到 0 的原生事件不清�
  assert.equal(box.scrollTop,1200,'内容恢复后应还原到原阅读位置');
  assert.equal(box.firstVisible().key,'m12');
  assert.equal(controller.state.follow,false);
+});
+
+test('内容收缩后仍可滚动时，布局钳位到底部不能冒充用户主动跟随', () => {
+ const {box,controller}=setup('harness.js');
+ const full=Array.from({length:30},(_,i)=>({key:'m'+i,height:100}));
+ enterLoaded(controller,box,'a',full);
+ box.userScroll(1200);
+ box.setLayout(full.slice(0,10));
+ box.scrollTop=box.maxTop;
+ box.dispatch('scroll');
+ controller.refresh();
+ controller.begin('a');
+ box.setLayout(full);
+ controller.end({sid:'a',ready:true});
+ assert.equal(controller.state.follow,false);
+ assert.equal(box.scrollTop,1200);
+ assert.equal(box.firstVisible().key,'m12');
 });

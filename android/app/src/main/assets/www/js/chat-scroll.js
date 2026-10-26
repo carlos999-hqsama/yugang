@@ -86,7 +86,8 @@ export function createChatScroll({ threshold = 56, isVisible = null } = {}) {
     // 旧锚点已过期，必须按当前位置重新取锚，否则会把用户拉回旧位置（如顶部）。
     // 内容塌缩到不足一屏（0/0）时的偏移变化来自布局钳位，不含用户意图，不能重取锚。
     const current = Math.max(0, box.scrollTop || 0);
-    if (anchor && Math.abs(current - anchor.top) > 2 && (current > 0 || maxTop() > 0)) anchor = capture();
+    // anchor.top > maxTop() 的偏移差来自布局钳位而非用户滚动：保留旧锚点等内容恢复。
+    if (anchor && Math.abs(current - anchor.top) > 2 && (current > 0 || maxTop() > 0) && anchor.top <= maxTop()) anchor = capture();
     if (anchor) restore(anchor);
     else anchor = capture();
   };
@@ -115,6 +116,11 @@ export function createChatScroll({ threshold = 56, isVisible = null } = {}) {
     // 内容不足一屏时的滚动事件只可能来自越界回弹或布局钳位，不含用户意图：
     // 既不能拿来打开跟随（会把下拉暂停的跟随重新打开），也不能拿来重取锚（会把锚点清到顶部）。
     if (top === 0 && max === 0) return;
+    // 锚点位置超出当前可滚动范围（anchor.top > max）说明内容塌缩后浏览器把
+    // scrollTop 钳到了新底部，而不是用户主动滚动到底：保持锚点与跟随状态，
+    // 等内容恢复后按原锚点还原。布局稳定时 anchor.top <= max 恒成立，
+    // 手动滚动到底仍正常恢复跟随。
+    if (max - top <= 2 && !follow && anchor && anchor.top > max) return;
     lastTop = top;
     if (max - top <= 2) {
       follow = true;
@@ -177,8 +183,9 @@ export function createChatScroll({ threshold = 56, isVisible = null } = {}) {
     }
     const current = Math.max(0, box?.scrollTop || 0);
     if (follow && !pendingEntry && visible() && current < lastTop - 2) pauseFollow();
-    // 0/0 塌缩态的偏移变化来自布局钳位而非用户滚动：保留旧锚点等内容恢复。
-    if (!follow && (!anchor || (Math.abs(current - anchor.top) > 2 && (current > 0 || maxTop() > 0)))) remember();
+    // 偏移差来自布局钳位（0/0 塌缩，或锚点位置超出当前可滚动范围）时
+    // 保留旧锚点等内容恢复，不用钳位位置重取锚。
+    if (!follow && (!anchor || (Math.abs(current - anchor.top) > 2 && (current > 0 || maxTop() > 0) && anchor.top <= maxTop()))) remember();
   };
   const end = ({ sid: nextSid = sid, ready = true, prepend = false } = {}) => {
     const next = nextSid == null ? '' : String(nextSid);
