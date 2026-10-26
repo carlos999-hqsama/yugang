@@ -19,6 +19,7 @@ internal object ChatContentPolicy {
         if (active) {
             // The API's download-only policy becomes the isolated interactive document policy.
             // Any other upstream policy remains independently enforced, never relaxed.
+            // CSP header policy lists are comma-delimited (W3C CSP section 2.2), not one directive list.
             kept["Content-Security-Policy"] = if (csp.isNullOrEmpty() || csp == "sandbox; default-src 'none'") DOCUMENT_SANDBOX else "$csp, $DOCUMENT_SANDBOX"
         } else if (!csp.isNullOrEmpty()) kept["Content-Security-Policy"] = csp
         kept["Cache-Control"] = "no-store"

@@ -114,7 +114,11 @@ internal class ChatContent(private val activity: MainActivity, private val net: 
                 return WebResourceResponse("text/html", "utf-8", 200, "OK", mapOf("Cache-Control" to "no-store", "Content-Security-Policy" to "default-src 'none'; style-src 'unsafe-inline'"), html.byteInputStream())
             }
         }
-        val kept = ChatContentPolicy.responseHeaders(mime, response.headers.names().associateWith { response.header(it).orEmpty() })
+        val upstreamHeaders = response.headers.names().associateWith {
+            if (it.equals("Content-Security-Policy", true)) response.headers.values(it).joinToString(", ")
+            else response.header(it).orEmpty()
+        }
+        val kept = ChatContentPolicy.responseHeaders(mime, upstreamHeaders)
         WebResourceResponse(mime, "utf-8".takeIf { PluginMime.isText(mime) }, response.code, response.message.ifBlank { "Response" }, kept, object : FilterInputStream(body.byteStream()) { override fun close() { try { super.close() } finally { response.close() } } })
     } catch (_: Exception) { forbidden(502, "Bad Gateway") } }
 

@@ -22,6 +22,11 @@ class ChatContentPolicyTest {
         assertEquals("default-src 'none'", media["Content-Security-Policy"])
         assertFalse(ChatContentPolicy.responseHeaders("image/png", emptyMap()).containsKey("Content-Security-Policy"))
     }
+    @Test fun `multiple upstream policies are retained as independent restrictions`() {
+        val upstream = "sandbox; default-src 'none', script-src 'none'"
+        val policy = ChatContentPolicy.responseHeaders("text/html", mapOf("Content-Security-Policy" to upstream))["Content-Security-Policy"]
+        assertEquals("$upstream, sandbox allow-scripts", policy)
+    }
     @Test fun `document names retain spaces hashes and question marks without URL queries`() {
         val path = "/BOT/default/documents/窄屏 #1?.html"
         val target = ChatContentPolicy.target(JSONObject().put("path",path),"/BOT/default")

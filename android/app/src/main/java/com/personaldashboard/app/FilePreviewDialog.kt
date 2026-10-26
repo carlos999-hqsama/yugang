@@ -19,9 +19,9 @@ class FilePreviewDialog(private val activity: MainActivity, private val pluginId
                 content.text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") + "</pre>"
         PluginSiteBrowserHost.openDocument(activity, owner, url, content.name, { request ->
             if (!closed && request.method == "GET" && request.isForMainFrame && request.url.toString() == url)
-                WebResourceResponse("text/html", "utf-8", 200, "OK", mapOf(
+                WebResourceResponse("text/html", "utf-8", 200, "OK", ChatContentPolicy.responseHeaders("text/html", mapOf(
                     "Content-Security-Policy" to "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'",
-                    "Cache-Control" to "no-store"), html.byteInputStream())
+                    "Cache-Control" to "no-store")), html.byteInputStream())
             else WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), ByteArray(0).inputStream())
         }, { result ->
             val external = result.optString("openCoreUrl")
