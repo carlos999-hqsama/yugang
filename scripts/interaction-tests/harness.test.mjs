@@ -649,7 +649,7 @@ test('durable图片读取失败可点击重试且错误消息不注入HTML',asyn
  assert.equal(app.root.querySelector('.chat-image img').getAttribute('src'),'data:image/webp;base64,YWJj');
 });
 
-test('切换会话清理附件缓存，旧请求完成不会串到当前会话',async()=>{
+test('不同会话的附件缓存隔离，旧请求完成不会串到当前会话',async()=>{
  const registry={defaultBotId:'default',bots:[{id:'default',name:'Bot',pinned:true,sessionIds:['sid-a','sid-b'],selectedSessionId:'sid-a'}]};
  const app=await boot({storage:{'pd.h.sel':'"sid-a"'},registry});
  for(const sid of ['sid-a','sid-b'])app.dshState.sessions.set(sid,{sessionId:sid,projections:{values:{title:sid}},updatedAt:1});
@@ -815,6 +815,68 @@ test('用户与Bot的裸链接保留配对括号，只移除句末多出的右�
  app.emit('running');await tick();
  for(const a of app.root.querySelectorAll('a[data-href]'))assert.equal(a.getAttribute('href'),url);
  assert.equal(app.root.querySelectorAll('a[data-href]').length,2);
+});
+
+function imageCacheRegistry() {
+  return {defaultBotId:'default',bots:[{id:'default',name:'主Bot',pinned:true,sessionIds:['a'],selectedSessionId:'a'},{id:'plugin',name:'插件Bot',pinned:true,sessionIds:['b'],selectedSessionId:'b'}]};
+}
+function imageSnapshot(id='sha256:'+'e'.repeat(64)) {
+  return {type:'snapshot',header:{cwd:'/BOT/default'},records:[{type:'event',event:{seq:1,type:'user/message',data:{source:{kind:'user'},content:[{type:'image',attachment:{attachmentId:id,mediaType:'image/png'}}]}}}]};
+}
+function cacheRows(app) {for(const sid of ['a','b'])app.dshState.sessions.set(sid,{sessionId:sid,updatedAt:1,projections:{values:{title:sid}}});}
+
+test('主Bot图片切到插件Bot再返回复用原图节点与附件数据，不重新请求',async()=>{
+  const app=await boot({storage:{'pd.h.sel':'"a"'},registry:imageCacheRegistry()});cacheRows(app);
+  const reads=[];app.api.attachment=async(sid,id)=>{reads.push({sid,id});return {attachment:{attachmentId:id,mediaType:'image/png'},data:'YWJj'};};
+  app.follows.at(-1).cb(imageSnapshot());await tick();const image=app.root.querySelector('.chat-image img');assert.ok(image);
+  app.emit('running');await tick();assert.equal(app.root.querySelector('.chat-image img'),image,'同会话刷新也应复用解码节点');
+  app.ns.dev.selectBot('plugin');app.follows.at(-1).cb({type:'snapshot',header:{},records:[]});
+  app.ns.dev.selectBot('default');app.follows.at(-1).cb(imageSnapshot());await tick();
+  assert.equal(reads.length,1);assert.equal(app.root.querySelector('.chat-image img'),image);assert.equal(app.root.querySelector('[data-status="loading"]'),null);
+});
+
+test('图片尚在读取时切走再返回不会发起第二次读取',async()=>{
+  const app=await boot({storage:{'pd.h.sel':'"a"'},registry:imageCacheRegistry()});cacheRows(app);
+  let done;let reads=0;app.api.attachment=(sid,id)=>{reads++;return new Promise(resolve=>{done=()=>resolve({attachment:{attachmentId:id,mediaType:'image/png'},data:'YWJj'});});};
+  app.follows.at(-1).cb(imageSnapshot());app.ns.dev.selectBot('plugin');app.ns.dev.selectBot('default');app.follows.at(-1).cb(imageSnapshot());
+  assert.equal(reads,1);done();await tick();assert.equal(app.root.querySelector('.chat-image img').getAttribute('src'),'data:image/png;base64,YWJj');
+});
+
+test('Bot返回的本地图片在切换后复用节点，图片地址变化时更新节点',async()=>{
+  const app=await boot({storage:{'pd.h.sel':'"a"'},registry:imageCacheRegistry()});cacheRows(app);
+  const snap=path=>({type:'snapshot',header:{cwd:'/BOT/default'},records:[{type:'event',event:{seq:1,type:'assistant/message',data:{message:{content:[{type:'text',text:`![图片](${path})`}]}}}}]});
+  app.follows.at(-1).cb(snap('/BOT/default/documents/a.png'));const image=app.root.querySelector('.chat-image img');assert.ok(image);
+  app.ns.dev.selectBot('plugin');app.follows.at(-1).cb({type:'snapshot',header:{},records:[]});app.ns.dev.selectBot('default');app.follows.at(-1).cb(snap('/BOT/default/documents/a.png'));
+  assert.equal(app.root.querySelector('.chat-image img'),image);
+  app.follows.at(-1).cb(snap('/BOT/default/documents/b.png'));assert.notEqual(app.root.querySelector('.chat-image img'),image);assert.equal(app.root.querySelector('.chat-image img').getAttribute('src'),'/BOT/default/documents/b.png');
+});
+
+test('近期图片缓存按会话淘汰，超过四个会话后旧附件才重新读取',async()=>{
+  const ids=['a','b','c','d','e'];const registry={defaultBotId:'default',bots:[{id:'default',name:'主Bot',pinned:true,sessionIds:ids,selectedSessionId:'a'}]};
+  const app=await boot({storage:{'pd.h.sel':'"a"'},registry});for(const sid of ids)app.dshState.sessions.set(sid,{sessionId:sid,updatedAt:1,projections:{values:{title:sid}}});
+  let reads=0;app.api.attachment=async(sid,id)=>{reads++;return {attachment:{attachmentId:id,mediaType:'image/png'},data:'YWJj'};};
+  for(const sid of ids){app.ns.dev.select(sid);app.follows.at(-1).cb(imageSnapshot());await tick();}
+  assert.equal(reads,5);app.ns.dev.select('a');app.follows.at(-1).cb(imageSnapshot());await tick();assert.equal(reads,6);
+  app.ns.dev.select('e');app.follows.at(-1).cb(imageSnapshot());await tick();assert.equal(reads,6,'最近会话仍复用缓存');
+});
+
+test('超大解码节点退出前台后被释放，附件字节仍缓存避免重新请求',async()=>{
+  const app=await boot({storage:{'pd.h.sel':'"a"'},registry:imageCacheRegistry()});cacheRows(app);
+  let reads=0;app.api.attachment=async(sid,id)=>{reads++;return {attachment:{attachmentId:id,mediaType:'image/png'},data:'YWJj'};};
+  app.follows.at(-1).cb(imageSnapshot());await tick();const image=app.root.querySelector('.chat-image img');image.naturalWidth=4096;image.naturalHeight=4096;
+  app.ns.dev.selectBot('plugin');app.follows.at(-1).cb({type:'snapshot',header:{},records:[]});app.ns.dev.selectBot('default');app.follows.at(-1).cb(imageSnapshot());await tick();
+  assert.equal(reads,1);assert.notEqual(app.root.querySelector('.chat-image img'),image);assert.equal(app.root.querySelector('.chat-image img').getAttribute('src'),'data:image/png;base64,YWJj');
+});
+
+test('已删除会话的图片授权缓存会被清理',async()=>{
+  const app=await boot({storage:{'pd.h.sel':'"a"'},registry:imageCacheRegistry()});cacheRows(app);
+  let reads=0;app.api.attachment=async(sid,id)=>{reads++;return {attachment:{attachmentId:id,mediaType:'image/png'},data:'YWJj'};};
+  app.follows.at(-1).cb(imageSnapshot());await tick();assert.equal(reads,1);
+  app.ns.dev.selectBot('plugin');app.follows.at(-1).cb({type:'snapshot',header:{},records:[]});
+  app.dshState.sessions.delete('a');app.emit('sessions');
+  app.dshState.sessions.set('a',{sessionId:'a',updatedAt:1,projections:{values:{title:'a'}}});
+  app.ns.dev.selectBot('default');app.follows.at(-1).cb(imageSnapshot());await tick();
+  assert.equal(reads,2,'删除后的会话不能沿用旧附件授权');
 });
 
 

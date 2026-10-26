@@ -40,26 +40,85 @@ const H = {
   bots: null, botId: LS('botId','default'), botError: '',
   readings: new Map(), inspector: LS('inspector', false),
 };
-let el, cover = true, pageVisible = true, chatScroll = null, mountReady = null;
+let el, cover = true, pageVisible = true, chatScroll = null, mountReady = null, renderedSid = null;
 export const PLUGIN_DEVELOPER_BOT_ID = '00000000-0000-4000-8000-000000000001';
 const PLUGIN_EXAMPLE_REQUEST = '创建一个能联网更新的 AI 新闻插件，并实际预览、测试后安装。';
 
 /* Durable user images are fetched only through the session-authorized API and cached by session. */
 const attachmentSessions = new Map();
+const INACTIVE_IMAGE_BYTES = 48 * 1024 * 1024;
+function imageSession(sid) {
+  let session = attachmentSessions.get(sid);
+  if (!session) session = { cancelled: false, items: new Map(), images: new Map() };
+  attachmentSessions.delete(sid);
+  attachmentSessions.set(sid, session);
+  return session;
+}
 function clearAttachmentSession(sid) {
   const session = attachmentSessions.get(sid);
   if (!session) return;
   session.cancelled = true;
   session.items.clear();
+  session.images.clear();
   attachmentSessions.delete(sid);
+}
+function imageNodeBytes(image) {
+  return (image.getAttribute('src') || '').length * 2 + (image.naturalWidth || 0) * (image.naturalHeight || 0) * 4;
+}
+function trimImageCache() {
+  const inactive = [...attachmentSessions].filter(([sid]) => sid !== H.sel);
+  while (inactive.length > 3) clearAttachmentSession(inactive.shift()[0]);
+  let bytes = inactive.reduce((total, [, session]) => total + [...session.items.values()].reduce((n, entry) => n + (entry.src || '').length * 2, 0) + [...session.images.values()].reduce((n, image) => n + imageNodeBytes(image), 0), 0);
+  // Release decoded nodes first; retain authorized bytes so rebuilding needs no new attachment fetch.
+  for (const [, session] of inactive) for (const [key, image] of session.images) {
+    if (bytes <= INACTIVE_IMAGE_BYTES) return;
+    bytes -= imageNodeBytes(image);
+    session.images.delete(key);
+  }
+  for (const [, session] of inactive) for (const [key, entry] of session.items) {
+    if (bytes <= INACTIVE_IMAGE_BYTES) return;
+    if (!entry.refreshing) {
+      bytes -= (entry.src || '').length * 2;
+      session.items.delete(key);
+    }
+  }
+}
+function chatImageKey(image, counts) {
+  const holder = image.closest('.chat-image');
+  const base = (image.closest('[data-scroll-key]')?.dataset.scrollKey || '') + '|' + (holder?.dataset.attachmentId || holder?.dataset.art || holder?.dataset.imageTitle || '');
+  const count = counts.get(base) || 0;
+  counts.set(base, count + 1);
+  return base + '|' + count;
+}
+function rememberChatImages(container) {
+  if (!renderedSid) return;
+  const images = container.querySelectorAll('.chat-image img[src]');
+  if (!images.length) return;
+  const session = imageSession(renderedSid), counts = new Map();
+  for (const image of images) {
+    if (!image.hidden) session.images.set(chatImageKey(image, counts), image);
+  }
+}
+function restoreChatImages(container, hasContent) {
+  if (!H.sel) return;
+  const session = imageSession(H.sel), counts = new Map(), current = new Map();
+  for (const image of container.querySelectorAll('img[data-cached-src]')) {
+    const src = image.getAttribute('data-cached-src'), key = chatImageKey(image, counts), cached = session.images.get(key);
+    if (cached && !cached.hidden && cached.getAttribute('src') === src) {
+      image.replaceWith(cached);
+      current.set(key, cached);
+    } else {
+      image.removeAttribute('data-cached-src');
+      image.setAttribute('src', src);
+      current.set(key, image);
+    }
+  }
+  if (hasContent) session.images = current;
+  trimImageCache();
 }
 function readDurableAttachment(sid, image, force = false) {
   if (!sid) return { status: 'loading' };
-  let session = attachmentSessions.get(sid);
-  if (!session) {
-    session = { cancelled: false, items: new Map() };
-    attachmentSessions.set(sid, session);
-  }
+  const session = imageSession(sid);
   let entry = session.items.get(image.attachmentId);
   if (entry?.status === 'loading') return entry;
   if (entry && !force && (!entry.optimistic || entry.refreshing)) return entry;
@@ -76,11 +135,13 @@ function readDurableAttachment(sid, image, force = false) {
   })().then(src => {
     if (session.cancelled) return;
     entry.status = 'loaded'; entry.src = src; entry.error = ''; entry.refreshing = false;
+    trimImageCache();
     if (H.sel === sid) renderMsgsSoon();
   }, error => {
     if (session.cancelled) return;
     entry.status = fallback ? 'loaded' : 'error'; entry.refreshing = false;
     entry.error = String(error?.message || error || '请重试').slice(0, 200);
+    trimImageCache();
     if (H.sel === sid) renderMsgsSoon();
   });
   return entry;
@@ -215,6 +276,9 @@ function onDshChange(w) {
   if (H.mode === 'web' || !el || !el.querySelector('.list')) return;
   if (w === 'state' && dsh.state !== 'online' && H.fh) { H.fh.cancel(); H.fh = null; }
   if (w === 'state' && H.searching && H.filter.trim()) scheduleSearch();
+  if (w === 'sessions' || w === 'workspaces') for (const sid of [...attachmentSessions.keys()]) {
+    if (sid !== H.sel && (dsh.archived.has(sid) || (dsh.sessions.size && !dsh.sessions.has(sid)))) clearAttachmentSession(sid);
+  }
   if ((w === 'sessions' || w === 'workspaces') && H.sel && dsh.sessions.has(H.sel) && dsh.archived.has(H.sel)) {
     const sid=activeSessionForBot(H.botId);
     if(sid!==H.sel)select(sid,{keep:true,botId:H.botId});
@@ -369,7 +433,9 @@ function renderSide(){
 
 /* ============================================================ 选择 / 关注会话 */
 function select(sid, { keep = false, botId = null } = {}) {
-  if (H.sel && H.sel !== sid) clearAttachmentSession(H.sel);
+  const previousMessages = el?.querySelector('.msgs');
+  const previousSid = H.sel;
+  if (previousMessages) rememberChatImages(previousMessages);
   if (!keep) { H.mobileChat = true; el.classList.toggle('mobile-chat', true); }
   if (!keep && (!botId||botId===H.botId) && sid === H.sel && H.fh) { chatScroll?.refresh(); return; }
   if(H.sel&&H.sel!==sid){chatScroll?.remember();H.readings.set(H.sel,{...chatScroll.state});}
@@ -379,6 +445,8 @@ function select(sid, { keep = false, botId = null } = {}) {
   H.navigationEpoch++; H.historyEpoch++;
   H.botId = botId || (sid ? ownerOfSession(H.bots,sid,dsh.sessions.get(sid)) : H.botId) || 'default'; SV('botId',H.botId);
   H.sel = sid; SV('sel', sid);
+  if (sid) { imageSession(sid); trimImageCache(); }
+  if (previousSid && previousSid !== sid && (dsh.archived.has(previousSid) || (dsh.sessions.size && !dsh.sessions.has(previousSid)))) clearAttachmentSession(previousSid);
   voiceScope(H.botId,sid);
   if(sid&&H.bots)void botCall({op:'select',id:H.botId,sessionId:sid}).catch(e=>toast('会话选择未保存：'+e.message));
   if (!keep){const saved=H.readings.get(sid);if(saved)chatScroll?.resume(sid,saved);else chatScroll?.enter(sid||'');}
@@ -427,8 +495,7 @@ function dropPending(ev, sid) {
     const originals = p.content.filter(b => b.type === 'image');
     const saved = (ev.data?.content || []).filter(b => b.type === 'image' && b.attachment);
     if (saved.length && originals.length === saved.length) {
-      let session = attachmentSessions.get(sid);
-      if (!session) { session = {cancelled:false,items:new Map()};attachmentSessions.set(sid,session); }
+      const session = imageSession(sid);
       saved.forEach((block,index) => {
         const id = block.attachment.attachmentId, src = inlineImageSrc(originals[index]);
         if (src && !session.items.has(id)) session.items.set(id,{status:'loaded',src,error:'',optimistic:true});
@@ -596,7 +663,11 @@ function renderMsgs(forceBottom = false, { prepend = false, beginScroll = true }
   const keyInput = keyCardNode?.querySelector('#dsk');
   const keyFocused = keyInput && document.activeElement === keyInput;
   const selection = keyFocused ? [keyInput.selectionStart, keyInput.selectionEnd] : null;
-  m.innerHTML = html;
+  rememberChatImages(m);
+  // Assign src only after node reuse, avoiding even a transient duplicate image request.
+  m.innerHTML = html.replace(/(<img\b[^>]*?)\ssrc="([^"]*)"/g, '$1 data-cached-src="$2"');
+  restoreChatImages(m, hasContent);
+  renderedSid = H.sel;
   restoreQuestionCards(m, questionCards);
   if (keyCardNode && m.querySelector('.rtx.key')) {
     m.querySelector('.rtx.key').replaceWith(keyCardNode);
@@ -873,6 +944,7 @@ async function showBotSettings(id){
         const bound=sessionsForBot(H.bots,id,dsh.sessions).map(session=>session.sessionId);
         if(bound.some(sid=>dsh.running.has(sid)||isWaiting(sid)))throw Error('这个 Bot 仍在运行或等待回答，请结束后再删除');
         await botCall({op:'delete',id,confirmDelete:true});
+        for(const sid of bound) clearAttachmentSession(sid);
         if(H.botId===id)selectBot('default');else renderSide();
         closeSheet();toast('Bot 已移除，工作区已归档');
       }

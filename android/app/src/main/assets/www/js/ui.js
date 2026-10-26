@@ -89,6 +89,7 @@ function sheetFocusables(pane) {
 function onSheetKey(e) {
   const sh = $('#sheet');
   if (!sh || !sh.classList.contains('on')) return;
+  if (document.activeElement?.closest('#menu.on')) return;
   if (e.key === 'Escape') {
     e.preventDefault();
     e.stopPropagation();

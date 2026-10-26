@@ -123,6 +123,18 @@ class El {
     if (i >= 0) { this.childNodes.splice(i, 1); node.parentNode = null; }
     return node;
   }
+  replaceWith(node) {
+    const parent = this.parentNode;
+    if (!parent || node === this) return;
+    if (node.parentNode) node.parentNode.removeChild(node);
+    const index = parent.childNodes.indexOf(this);
+    parent.childNodes.splice(index, 1, node);
+    this.parentNode = null;
+    this.isConnected = false;
+    this.syncConnected();
+    node.parentNode = parent;
+    parent.syncConnected();
+  }
   remove() { if (this.parentNode && typeof this.parentNode.removeChild === 'function') this.parentNode.removeChild(this); }
   syncConnected() {
     for (const child of this.childNodes) {

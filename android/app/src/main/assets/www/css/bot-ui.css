@@ -130,3 +130,18 @@ body.cover #scr-harness.bot-detail-open .bot-detail{display:flex;position:absolu
 .tone-pink{--bot-color:#C04494}
 .tone-stone{--bot-color:#76767A}
 .tone-slate{--bot-color:#444B56}
+
+/* Settings use one text scale; the profile name opens an inline editor. */
+#sheet .bot-settings{font:inherit;font-size:13.5px;line-height:1.6}
+#sheet .bot-settings :is(input,textarea,button,legend,label,output,.bot-avatar-step,.bot-settings-hint){font:inherit;line-height:inherit}
+#sheet .bot-settings legend{font-weight:600;color:var(--ui-text-soft,#555)}
+#sheet .bot-settings fieldset{min-inline-size:0}
+#sheet .bot-settings-profile{display:flex;flex-direction:column;align-items:center;gap:8px;padding:4px 0 8px}
+#sheet .bot-settings-profile .bot-avatar-preview{padding:0}
+#sheet .bot-settings-name{display:inline-flex;align-items:center;justify-content:center;gap:5px;max-width:100%;padding:4px 6px;border:0;border-radius:6px;background:none;color:inherit;cursor:pointer;font-weight:600;text-align:center;overflow-wrap:anywhere}
+#sheet .bot-settings-name [data-bot-name-label]{min-width:0}
+#sheet .bot-settings-name .ico{width:13px;height:13px;color:var(--ui-text-soft,#777)}
+#sheet .bot-settings-name>span[aria-hidden]{display:flex;flex:none}
+#sheet .bot-settings-name:focus-visible{outline:2px solid #777;outline-offset:2px}
+#sheet .bot-settings-name-input{width:min(260px,100%);box-sizing:border-box;text-align:center}
+#sheet :is(.bot-settings-name,.bot-settings-name-input)[hidden]{display:none}
